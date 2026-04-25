@@ -49,8 +49,12 @@ done:
 `;
 
 const STACK_BASE = 1024;
+const DATA_BASE = 2048;
 const ROW_HEIGHT = 32;
 const VALUE_FORMATS = ['decimal', 'hexadecimal', 'binary'];
+const DEFAULT_DATA = `.long
+a: -20, 0, 1, 10, 100
+b: 120, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15`;
 
 function splitArgs(argsStr) {
   const args = [];
@@ -142,6 +146,60 @@ function getInitialState() {
     consoleOutput: [],
     halted: false,
   };
+}
+
+function parseDataSection(dataInput) {
+  const trimmedInput = dataInput.trim();
+  if (!trimmedInput) {
+    return { memory: {}, labels: {} };
+  }
+
+  const lines = dataInput
+    .split('\n')
+    .map((line) => line.split('//')[0].split(';')[0].trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return { memory: {}, labels: {} };
+  }
+
+  if (lines[0].toLowerCase() !== '.long') {
+    throw new Error('Data must start with .long');
+  }
+
+  const memory = {};
+  const labels = {};
+  let nextAddress = DATA_BASE;
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const entry = lines[i];
+    const match = entry.match(/^([A-Za-z_]\w*):\s*(.+)$/);
+    if (!match) {
+      throw new Error(`Invalid data declaration: ${entry}`);
+    }
+
+    const [, label, valuesStr] = match;
+    if (labels[label] !== undefined) {
+      throw new Error(`Duplicate data label: ${label}`);
+    }
+
+    const rawValues = valuesStr.split(',').map((value) => value.trim()).filter(Boolean);
+    if (!rawValues.length) {
+      throw new Error(`Data label ${label} must define at least one value`);
+    }
+
+    labels[label] = nextAddress;
+
+    rawValues.forEach((rawValue) => {
+      if (!/^-?\d+$/.test(rawValue)) {
+        throw new Error(`Invalid .long value "${rawValue}" for label ${label}`);
+      }
+      memory[nextAddress] = Number.parseInt(rawValue, 10);
+      nextAddress += 8;
+    });
+  }
+
+  return { memory, labels };
 }
 
 function formatValue(value, format) {
@@ -280,6 +338,7 @@ function getLrFinalPc(inst, regs, memory) {
 
 export default function App() {
   const [sourceCode, setSourceCode] = useState(DEFAULT_CODE);
+  const [dataInput, setDataInput] = useState(DEFAULT_DATA);
   const [assembled, setAssembled] = useState(false);
   const [program, setProgram] = useState([]);
   const [labels, setLabels] = useState({});
@@ -335,7 +394,7 @@ export default function App() {
     try {
       const lines = sourceCode.split('\n');
       const nextProgram = [];
-      const nextLabels = {};
+      const nextCodeLabels = {};
       let instIndex = 0;
 
       for (let i = 0; i < lines.length; i += 1) {
@@ -344,7 +403,7 @@ export default function App() {
 
         const labelMatch = line.match(/^([a-zA-Z_]\w*):(.*)/);
         if (labelMatch) {
-          nextLabels[labelMatch[1]] = instIndex * 4;
+          nextCodeLabels[labelMatch[1]] = instIndex * 4;
           line = labelMatch[2].trim();
         }
 
@@ -368,11 +427,23 @@ export default function App() {
         instIndex += 1;
       }
 
+      const { memory: dataMemory, labels: dataLabels } = parseDataSection(dataInput);
+      const duplicateLabels = Object.keys(dataLabels).filter((label) => nextCodeLabels[label] !== undefined);
+      if (duplicateLabels.length) {
+        throw new Error(`Duplicate label name used in code and data: ${duplicateLabels[0]}`);
+      }
+
+      const nextLabels = { ...nextCodeLabels, ...dataLabels };
+      const nextState = {
+        ...getInitialState(),
+        memory: dataMemory,
+      };
+
       setProgram(nextProgram);
       setLabels(nextLabels);
       setBreakpoints([]);
       setAssembled(true);
-      setMachineState(getInitialState());
+      setMachineState(nextState);
       setError('');
     } catch (err) {
       setError(`Assembly Error: ${err.message}`);
@@ -560,7 +631,11 @@ export default function App() {
           else writeReg(args[0], readReg(args[1]));
           break;
         case 'LDA':
-          writeReg(args[0], parseImm(args[1]));
+          if (args[1].startsWith('#')) writeReg(args[0], parseImm(args[1]));
+          else {
+            if (labelMap[args[1]] === undefined) throw new Error(`Label ${args[1]} not found`);
+            writeReg(args[0], labelMap[args[1]]);
+          }
           break;
         case 'PUTINT':
           newConsoleOutput.push(`${readReg(args[0])}`);
@@ -665,7 +740,19 @@ export default function App() {
   };
 
   const handleReset = () => {
-    setMachineState(getInitialState());
+    const clearedState = getInitialState();
+    setMachineState(clearedState);
+    setDataInput('');
+    setError('');
+  };
+
+  const handleClearData = () => {
+    const clearedState = {
+      ...machineState,
+      memory: {},
+    };
+    setDataInput('');
+    setMachineState(clearedState);
     setError('');
   };
 
@@ -684,8 +771,10 @@ export default function App() {
 
   let minMem = Math.min(...Object.keys(machineState.memory).map(Number).filter((n) => !Number.isNaN(n)));
   if (minMem === Infinity) minMem = STACK_BASE;
+  let maxMem = Math.max(...Object.keys(machineState.memory).map(Number).filter((n) => !Number.isNaN(n)));
+  if (maxMem === -Infinity) maxMem = STACK_BASE;
 
-  let dynamicTop = Math.max(STACK_BASE + 16, machineState.regs[28] + 16, machineState.regs[29] + 16);
+  let dynamicTop = Math.max(STACK_BASE + 16, machineState.regs[28] + 16, machineState.regs[29] + 16, maxMem + 16);
   dynamicTop = Math.ceil(dynamicTop / 8) * 8;
 
   let bottomAddr = Math.min(minMem, machineState.regs[28], machineState.regs[29]) - 40;
@@ -750,6 +839,9 @@ export default function App() {
           <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={!assembled}>
             <RotateCcw size={16} /> Reset
           </button>
+          <button type="button" className="btn btn-ghost" onClick={handleClearData}>
+            <Layers size={16} /> Clear Data
+          </button>
         </div>
       </header>
 
@@ -794,6 +886,23 @@ export default function App() {
               onScroll={syncSourceScroll}
               spellCheck="false"
               wrap="off"
+            />
+          </div>
+        </section>
+
+        <section className="panel panel-data">
+          <div className="panel-header">
+            <span>Data</span>
+            <span className="panel-tag">.long (8 bytes each)</span>
+          </div>
+          <div className="data-editor-shell">
+            <textarea
+              className="data-editor custom-scrollbar"
+              value={dataInput}
+              onChange={(event) => setDataInput(event.target.value)}
+              spellCheck="false"
+              wrap="off"
+              placeholder={[".long", "arr1: 1, 2, 3", "arr2: 4, 5, 6"].join('\n')}
             />
           </div>
         </section>
