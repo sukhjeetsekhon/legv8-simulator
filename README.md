@@ -13,6 +13,8 @@ npm run dev
 
 Open the URL shown in your terminal (typically `http://localhost:5173`).
 
+You can also create a desktop shortcut and set the path to the `run-sim.bat` file. This way you can run the .bat file by double-clicking the shortcut and it will automatically run the simulator into Google Chrome.
+
 ---
 
 ## Interface Overview
