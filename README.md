@@ -1,6 +1,6 @@
 # LEGv8 Simulator
 
-An interactive browser-based simulator for the **LEGv8** instruction set — a teaching subset of ARMv8 used in *Computer Organization and Design* (Patterson & Hennessy). Write assembly, step through execution, inspect registers, flags, and live stack memory all in one view.
+An interactive browser-based simulator for the LEGv8 instruction set, a teaching subset of ARMv8 used in *Computer Organization and Design* (Patterson & Hennessy). Write assembly, step through execution, inspect registers and flags, and watch stack/data memory update live.
 
 ---
 
@@ -11,58 +11,96 @@ npm install
 npm run dev
 ```
 
-Open the URL shown in your terminal (typically `http://localhost:5173`).
+Open the URL shown in your terminal, typically `http://localhost:5173`.
 
-You can also create a desktop shortcut and set the path to the `run-sim.bat` file. This way you can run the .bat file by double-clicking the shortcut and it will automatically run the simulator into Google Chrome.
+You can also create a desktop shortcut that points to `run-sim.bat` to launch the simulator directly in Chrome.
 
 ---
 
 ## Interface Overview
 
-The UI is split into four panels:
+The UI is split into five panels:
 
 | Panel | Purpose |
 |---|---|
-| **Source Code** | Write or paste LEGv8 assembly |
-| **Execution View** | See every instruction; highlights the current PC |
-| **Registers / Flags** | Live register file and NZCV flag state |
-| **Stack Memory** | Visual stack with SP / FP / offset / LR-final pointers |
+| **Source Code** | Write or paste LEGv8 assembly with syntax highlighting, whitespace markers, and mutation hints |
+| **Data** | Define `.byte`, `.half`, `.word`, `.long`, or `.quad` values loaded into memory before execution |
+| **Execution View** | See every instruction and the current PC |
+| **Registers / Flags** | Inspect the live register file and NZCV state |
+| **Stack Memory** | Visual stack and memory view with SP / FP / computed pointer overlays |
 
 ---
 
 ## Workflow
 
-### 1 — Write code
-Type directly in the **Source Code** panel. Syntax highlighting updates as you type. Labels, opcodes, registers, immediates, and comments are all coloured.
+### 1. Write code
 
-### 2 — Assemble
-Click **Assemble** (or press `Alt + A`). The assembler:
-- Strips comments (`//` or `;`)
-- Resolves labels to byte-addresses (PC increments by 4 per instruction)
-- Resets the machine to its initial state (SP = FP = 1024, all other registers = 0)
-- Clears any existing breakpoints
+Type directly in the **Source Code** panel. Labels, opcodes, registers, immediates, line comments, and block comments are highlighted as you type.
 
-If there is a syntax error you will see a red banner with the line number and message.
+- Click **Shortcuts** to open the editor help card.
+- Press `Tab` to indent the current line or selected lines by 3 spaces.
+- Press `Shift + Tab` to outdent the current line or selected lines.
+- Press `Ctrl + X` to cut the current source line.
+- Press `Ctrl + Z` / `Ctrl + Shift + Z` to undo and redo source edits.
+- Click **Format** to normalize source spacing while preserving comments.
+- Turn on **Whitespace** to show spaces and tabs with subtle markers.
+- Turn on **Mutations** to highlight register references touched by the most recent step.
+- Add register notes with inline comments such as `MOV X0, #4  // @X0 current loop counter`; hovering a highlighted register reference shows the note.
 
-### 3 — Run / Step / Reset
+### 2. Add data
+
+Use the **Data** panel to define numeric values preloaded into memory before execution.
+
+```asm
+.long
+arr1: -20, 0, 1, 10, 100
+arr2: 120, 2, 3, 4, 5
+```
+
+Supported directives:
+
+- `.byte` = 1 byte
+- `.half` = 2 bytes
+- `.word` = 4 bytes
+- `.long` = 8 bytes
+- `.quad` = 8 bytes
+
+The stack/memory panel adapts its visible address stride to the active data width.
+
+### 3. Assemble
+
+Click **Assemble** or press `Alt + A`. The assembler:
+
+- Strips `//`, `;`, `/* ... */`, and `/** ... */` comments
+- Resolves code labels to byte addresses
+- Resolves data labels to memory addresses
+- Loads data values into memory before the first instruction runs
+- Resets the machine to its initial state
+- Clears existing breakpoints
+
+If there is a syntax error, a red banner shows the line number and message.
+
+### 4. Run / Step / Reset
 
 | Control | Keyboard | Description |
 |---|---|---|
 | **Run** | `Alt + R` | Execute until halt, error, or breakpoint |
 | **Step** | `Alt + S` | Execute exactly one instruction |
-| **Reset** | — | Restore machine to post-assemble initial state |
+| **Undo Step** | `Alt + Z` | Restore the previous execution snapshot |
+| **Reset** | — | Reset registers, flags, and PC and clear the Data editor plus memory |
+| **Clear Data** | — | Clear the Data editor and memory without changing source code |
 
-A green banner appears when the program reaches a `STOP` instruction or runs off the end of the program.
+A green banner appears when the program reaches `STOP` or runs off the end of the program.
 
 ---
 
 ## Breakpoints
 
-Double-click the **gutter dot** to the left of any instruction in the Execution View to toggle a breakpoint (shown as a red dot).
+Double-click the gutter dot to the left of any instruction in the Execution View to toggle a breakpoint.
 
-- **Run** will pause execution when it reaches a breakpointed instruction and display the PC in the status banner.
-- If execution is **already sitting on a breakpoint**, clicking Run advances past it and continues — no need to Step or Reset first.
-- Breakpoints are cleared whenever you **Assemble** again.
+- **Run** pauses when execution reaches a breakpointed instruction.
+- If execution is already sitting on a breakpoint, **Run** advances past it and continues.
+- Breakpoints are cleared whenever you assemble again.
 
 ---
 
@@ -70,31 +108,28 @@ Double-click the **gutter dot** to the left of any instruction in the Execution 
 
 Use the dropdown in the **Registers** panel to view values as:
 
-- `decimal` — signed decimal (negative values display as `-n`)
-- `hexadecimal` — 32-bit unsigned hex (`0xFFFFFFxx`)
-- `binary` — 32-bit unsigned binary (`0b111…`)
+- `decimal`
+- `hexadecimal`
+- `binary`
+
+The most recently mutated registers are highlighted in the register panel, and the source editor can optionally highlight matching register references.
+The current instruction also previews register usage in the register panel: destination writes use one highlight color, while source operands use a second color.
 
 ---
 
 ## Stack Memory
 
-The stack panel shows addresses from just below the current SP/FP down to the highest address that has been written. Columns show the byte address and stored value.
+The stack panel shows addresses from just below the current SP/FP down to the highest address that has been written. The rendered range expands when needed so computed offsets and final pointer targets remain visible.
 
-**Pointer overlays** (left sidebar of the stack):
+Pointer overlays:
 
 | Label | Meaning |
 |---|---|
-| `SP ->` | X28 — Stack Pointer |
-| `FP ->` | X29 — Frame Pointer |
-| `Xn+offset ->` | Address computed by the **current** `STUR`/`LDUR` instruction |
-| `Xn final ->` | Address that SP/FP **will** hold after the current `ADDI`/`SUBI` completes |
-| `LR final ->` | PC that will be written into **X30 (LR)** by the current `BL` instruction, or loaded into LR by `LDUR X30, …` |
-
----
-
-## Execution View — Current Instruction Bar
-
-A **banner above the instruction list** always shows the instruction currently about to execute, its mnemonic, and its byte address. This updates every step and every breakpoint pause.
+| `SP ->` | X28, Stack Pointer |
+| `FP ->` | X29, Frame Pointer |
+| `Xn+offset ->` | Address computed by the current `STUR` / `LDUR` instruction |
+| `Xn final ->` | Address SP/FP will hold after the current `ADDI` / `SUBI` completes |
+| `LR final ->` | PC that will be written into LR by `BL`, or loaded into LR by `LDUR X30, ...` |
 
 ---
 
@@ -105,10 +140,10 @@ A **banner above the instruction list** always shows the instruction currently a
 | Instruction | Syntax | Operation |
 |---|---|---|
 | `ADD` | `ADD Xd, Xn, Xm` | Xd = Xn + Xm |
-| `SUB` | `SUB Xd, Xn, Xm` | Xd = Xn − Xm |
+| `SUB` | `SUB Xd, Xn, Xm` | Xd = Xn - Xm |
 | `ADDI` | `ADDI Xd, Xn, #imm` | Xd = Xn + imm |
-| `SUBI` | `SUBI Xd, Xn, #imm` | Xd = Xn − imm |
-| `MUL` | `MUL Xd, Xn, Xm` | Xd = Xn × Xm |
+| `SUBI` | `SUBI Xd, Xn, #imm` | Xd = Xn - imm |
+| `MUL` | `MUL Xd, Xn, Xm` | Xd = Xn * Xm |
 | `AND` | `AND Xd, Xn, Xm` | Xd = Xn & Xm |
 | `ORR` | `ORR Xd, Xn, Xm` | Xd = Xn \| Xm |
 | `EOR` | `EOR Xd, Xn, Xm` | Xd = Xn ^ Xm |
@@ -116,7 +151,7 @@ A **banner above the instruction list** always shows the instruction currently a
 | `ORRI` | `ORRI Xd, Xn, #imm` | Xd = Xn \| imm |
 | `EORI` | `EORI Xd, Xn, #imm` | Xd = Xn ^ imm |
 | `LSL` | `LSL Xd, Xn, #shamt` | Xd = Xn << shamt |
-| `LSR` | `LSR Xd, Xn, #shamt` | Xd = Xn >> shamt (logical) |
+| `LSR` | `LSR Xd, Xn, #shamt` | Xd = Xn >> shamt |
 
 ### Flags-setting
 
@@ -141,7 +176,7 @@ A **banner above the instruction list** always shows the instruction currently a
 | Instruction | Syntax | Condition |
 |---|---|---|
 | `B` | `B label` | Unconditional |
-| `BL` | `BL label` | Branch-and-Link: LR = PC+4, jump to label |
+| `BL` | `BL label` | Branch-and-Link |
 | `BR` | `BR Xn` | Jump to address in register |
 | `B.EQ` | `B.EQ label` | Z = 1 |
 | `B.NE` | `B.NE label` | Z = 0 |
@@ -150,14 +185,14 @@ A **banner above the instruction list** always shows the instruction currently a
 | `B.GT` | `B.GT label` | N = 0 and Z = 0 |
 | `B.GE` | `B.GE label` | N = 0 |
 | `CBZ` | `CBZ Xn, label` | Xn = 0 |
-| `CBNZ` | `CBNZ Xn, label` | Xn ≠ 0 |
+| `CBNZ` | `CBNZ Xn, label` | Xn != 0 |
 
 ### Pseudo / Utility
 
 | Instruction | Syntax | Description |
 |---|---|---|
 | `MOV` | `MOV Xd, #imm` or `MOV Xd, Xn` | Move immediate or register |
-| `LDA` | `LDA Xd, #imm` | Load immediate address |
+| `LDA` | `LDA Xd, #imm` or `LDA Xd, label` | Load an immediate address or data-label address |
 | `PUTINT` | `PUTINT Xn` | Print Xn to the Mini Console |
 | `STOP` | `STOP` | Halt execution |
 
@@ -169,68 +204,24 @@ A **banner above the instruction list** always shows the instruction currently a
 |---|---|---|
 | `SP` | X28 | Stack Pointer |
 | `FP` | X29 | Frame Pointer |
-| `LR` | X30 | Link Register (return address) |
+| `LR` | X30 | Link Register |
 | `XZR` | — | Always-zero register |
 
-Both the alias (`SP`, `LR`, etc.) and the numbered form (`X28`, `X30`) are accepted everywhere.
+Both alias names and numbered forms are accepted.
 
 ---
 
-## Negative (Signed) Values
+## Data Labels with `LDA`
 
-Registers hold **signed** integers. You can use negative immediates freely:
+`LDA` can load the base address of a label defined in the **Data** panel:
 
 ```asm
-MOV X0, #-10
-ADDI X1, X0, #3    // X1 = -7
-CMP X1, #0
-B.LT negative      // branches because -7 < 0
+LDA X0, arr1
+LDA X1, arr2
 ```
-
-The decimal display shows the signed value. Hex and binary displays show the standard 32-bit two's-complement bit pattern.
 
 ---
 
-## Example Program — Recursive Factorial
+## Example Program
 
-The default program loaded on startup computes **4!** recursively:
-
-```asm
-MOV X28, #1024     // Init SP
-MOV X29, #1024     // Init FP
-MOV X0, #4        // n = 4
-
-BL factorial
-B done
-
-factorial:
-SUBI X28, X28, #16
-STUR X30, [X28, #8]  // Save LR
-STUR X0,  [X28, #0]  // Save n
-CMP X0, #1
-B.GT recurse
-MOV X1, #1
-B return
-
-recurse:
-SUBI X0, X0, #1
-BL factorial
-LDUR X0, [X28, #0]   // Restore n
-MUL X1, X1, X0       // X1 *= n
-
-return:
-LDUR X30, [X28, #8]  // Restore LR
-ADDI X28, X28, #16
-BR X30               // Return
-
-done:
-// X1 holds the result (24)
-```
-
-Step through this program to see the stack frame being built and torn down on each recursive call. The **LR final →** pointer in the stack view shows exactly where each `BL` will store its return address before jumping.
-
----
-
-## Execution Limits
-
-To prevent infinite loops, **Run** stops automatically after **5 000 instructions** and displays a safety-limit warning. Use **Step** to continue manually, or fix your loop termination condition and re-assemble.
+The default program computes `4!` recursively and demonstrates stack allocation, LR save/restore, and branching.

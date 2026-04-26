@@ -68,6 +68,12 @@
   transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms ease;
 }
 
+.btn-small {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  border-radius: 10px;
+}
+
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
 }
@@ -108,6 +114,11 @@
 
 .btn-ghost:hover:not(:disabled) {
   background: #1e293b;
+}
+
+.btn-toggle-active {
+  background: #1e293b;
+  border-color: #475569;
 }
 
 .status-banner {
@@ -213,6 +224,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .panel-header-icon {
@@ -257,6 +269,98 @@
   border-radius: 10px;
   padding: 5px 8px;
   font: 0.75rem 'Consolas', 'Courier New', monospace;
+}
+
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.toggle-chip input {
+  margin: 0;
+}
+
+.editor-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.85);
+  background: rgba(2, 6, 23, 0.72);
+  color: #64748b;
+  font: 0.72rem/1.4 'Consolas', 'Courier New', monospace;
+}
+
+.info-card {
+  margin: 12px 16px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.82));
+  box-shadow: 0 18px 30px rgba(2, 6, 23, 0.24);
+}
+
+.info-card-title {
+  margin-bottom: 10px;
+  color: #dbeafe;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.info-card-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 14px;
+  color: #94a3b8;
+  font: 0.76rem/1.45 'Consolas', 'Courier New', monospace;
+}
+
+.info-card-grid span:nth-child(odd) {
+  color: #bfdbfe;
+  font-weight: 700;
+}
+
+.note-card {
+  padding: 12px 14px;
+  border: 1px solid rgba(52, 211, 153, 0.32);
+  border-radius: 14px;
+  background: rgba(6, 78, 59, 0.18);
+  box-shadow: 0 18px 30px rgba(2, 6, 23, 0.3);
+}
+
+.note-card-floating {
+  position: fixed;
+  top: 92px;
+  right: 24px;
+  z-index: 30;
+  width: min(320px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.note-card-title {
+  margin-bottom: 6px;
+  color: #a7f3d0;
+  font: 0.78rem/1.3 'Consolas', 'Courier New', monospace;
+  font-weight: 700;
+}
+
+.note-card-body {
+  color: #d1fae5;
+  font: 0.8rem/1.45 'Consolas', 'Courier New', monospace;
+}
+
+.note-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .source-editor-shell {
@@ -330,7 +434,7 @@
   font: 0.92rem/1.5 'Consolas', 'Courier New', monospace;
   tab-size: 4;
   white-space: pre;
- }
+}
 
 .token-opcode {
   color: #60a5fa;
@@ -352,6 +456,16 @@
 
 .token-comment {
   color: #64748b;
+}
+
+.token-whitespace {
+  color: rgba(148, 163, 184, 0.28);
+}
+
+.token-register-mutated {
+  background: rgba(250, 204, 21, 0.12);
+  box-shadow: inset 0 -1px 0 rgba(250, 204, 21, 0.45);
+  border-radius: 4px;
 }
 
 .trace-list {
@@ -516,10 +630,37 @@
 
 .register-card {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  min-height: 56px;
+  padding: 8px 9px;
+}
+
+.register-card-top {
+  display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 6px;
-  padding: 6px 7px;
+  width: 100%;
+}
+
+.register-card-mutated {
+  border-color: rgba(250, 204, 21, 0.65);
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.18);
+}
+
+.register-card-destination {
+  border-color: rgba(96, 165, 250, 0.72);
+  background: rgba(30, 64, 175, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.2);
+}
+
+.register-card-source {
+  border-color: rgba(52, 211, 153, 0.58);
+  background: rgba(6, 95, 70, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.18);
 }
 
 .register-name,
@@ -542,6 +683,20 @@
 .register-value {
   color: #34d399;
   font-size: 0.66rem;
+}
+
+.register-note {
+  color: #93c5fd;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.register-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
 }
 
 .flag-grid {
@@ -790,6 +945,11 @@
   font-size: 11px;
   flex-shrink: 0;
   opacity: 0.7;
+}
+
+.current-inst-bar-halted {
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom-color: rgba(34, 197, 94, 0.35);
 }
 
 /* Halted variant */
