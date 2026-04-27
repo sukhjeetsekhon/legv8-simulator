@@ -23,11 +23,11 @@ The UI is split into five panels:
 
 | Panel | Purpose |
 |---|---|
-| **Source Code** | Write or paste LEGv8 assembly with syntax highlighting, whitespace markers, and mutation hints |
+| **Source Code** | Write or paste LEGv8 assembly with syntax highlighting, unsupported-instruction warnings, register notes, and built-in docs |
 | **Data** | Define `.byte`, `.half`, `.word`, `.long`, or `.quad` values loaded into memory before execution |
-| **Execution View** | See every instruction and the current PC |
+| **Execution View** | See every instruction, the current PC, and the next-instruction preview |
 | **Registers / Flags** | Inspect the live register file and NZCV state |
-| **Stack Memory** | Visual stack and memory view with SP / FP / computed pointer overlays |
+| **Stack Memory** | Visual stack and memory view with SP / FP / computed pointer overlays plus selectable address stride |
 
 ---
 
@@ -44,8 +44,11 @@ Type directly in the **Source Code** panel. Labels, opcodes, registers, immediat
 - Press `Ctrl + Z` / `Ctrl + Shift + Z` to undo and redo source edits.
 - Click **Format** to normalize source spacing while preserving comments.
 - Turn on **Whitespace** to show spaces and tabs with subtle markers.
-- Turn on **Mutations** to highlight register references touched by the most recent step.
 - Add register notes with inline comments such as `MOV X0, #4  // @X0 current loop counter`; hovering a highlighted register reference shows the note.
+- Add stack memory notes with store comments such as `STUR LR, [FP, #0] // @memory link register`; later stores to the same address replace the note.
+- Click **Docs** to open the built-in instruction reference.
+- Click an instruction mnemonic in the editor to open a quick tooltip with a short description and example.
+- Unsupported-looking instructions show a warning icon in the editor gutter, and the Docs view still includes them with an unsupported label and example usage.
 
 ### 2. Add data
 
@@ -65,7 +68,7 @@ Supported directives:
 - `.long` = 8 bytes
 - `.quad` = 8 bytes
 
-The stack/memory panel adapts its visible address stride to the active data width.
+The stack/memory panel now lets you choose an address stride of `1`, `2`, `4`, `8`, `16`, `32`, or `64` bytes. The default is `8` bytes.
 
 ### 3. Assemble
 
@@ -77,6 +80,7 @@ Click **Assemble** or press `Alt + A`. The assembler:
 - Loads data values into memory before the first instruction runs
 - Resets the machine to its initial state
 - Clears existing breakpoints
+- Correctly ignores extra `/` characters that appear later inside `//` comments such as `// n / 2`
 
 If there is a syntax error, a red banner shows the line number and message.
 
@@ -112,7 +116,6 @@ Use the dropdown in the **Registers** panel to view values as:
 - `hexadecimal`
 - `binary`
 
-The most recently mutated registers are highlighted in the register panel, and the source editor can optionally highlight matching register references.
 The current instruction also previews register usage in the register panel: destination writes use one highlight color, while source operands use a second color.
 
 ---
@@ -225,3 +228,17 @@ LDA X1, arr2
 ## Example Program
 
 The default program computes `4!` recursively and demonstrates stack allocation, LR save/restore, and branching.
+
+---
+
+## Recent Simulator Updates
+
+- The editor now shows a gutter warning icon for instructions that appear unsupported, and mnemonic clicks can open an inline instruction tooltip.
+- A built-in **Docs** view now lists every supported instruction with a short description and example usage.
+- The Docs view also includes unsupported mnemonics seen in the editor, with tooltips and example usage.
+- The Execution View now includes local **Run** and **Step** buttons plus a current/next instruction preview that follows taken branches.
+- The Data, Stack, and Registers panels now have their own clear controls, including a stack-only clear that preserves assembled Data memory.
+- The Mini Console now lives below the Data panel, and stack cells can show inline `@memory` notes from store instructions.
+- Register cards now scroll long values and notes horizontally, and they warn when a value falls outside the signed 64-bit range.
+- The Stack Memory panel now supports selectable address strides of `1`, `2`, `4`, `8`, `16`, `32`, or `64` bytes.
+- The assembler comment handling was hardened so text like `// n / 2` is treated as a comment instead of accidentally parsing the later `/`.

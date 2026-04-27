@@ -1,17 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
+
+
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
+  BookOpen,
   CheckCircle,
   Cpu,
   Eye,
   HelpCircle,
-  History,
   Layers,
   LayoutList,
   Play,
   RotateCcw,
   StepBack,
   StepForward,
+  Trash2,
 } from 'lucide-react';
 import './App.css';
 
@@ -30,7 +34,7 @@ SUBI SP, SP, #16  // Allocate 16 bytes on stack
 STUR LR, [SP, #8] // @LR return address; save LR
 STUR X0, [SP, #0] // Save N
 
-CMP X0, #1        // Compare N with 1
+CMPI X0, #1        // Compare N with 1
 B.GT recurse      // If N > 1, recurse
 
 /* Base case: return 1 */
@@ -69,6 +73,83 @@ b: 120, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15`;
 const TAB_SPACES = '   ';
 const MAX_HISTORY = 200;
 const REGISTER_PATTERN = /\b(X(?:[12]?\d|3[01]|ZR)|SP|FP|LR)\b/gi;
+const STACK_STRIDE_OPTIONS = [1, 2, 4, 8, 16, 32, 64];
+const INT64_MIN = -(2 ** 63);
+const INT64_MAX = (2 ** 63) - 1;
+const IMPLEMENTED_INSTRUCTIONS = new Set([
+  'ADD', 'ADDS', 'ADDI', 'ADDIS', 'SUB', 'SUBS', 'SUBI', 'SUBIS',
+  'AND', 'ANDS', 'ANDI', 'ANDIS', 'ORR', 'ORRI', 'EOR', 'EORI',
+  'LSL', 'LSR', 'LDUR', 'STUR', 'LDURSW', 'STURW', 'LDURH', 'STURH',
+  'LDURB', 'STURB', 'LDXR', 'STXR', 'MOVZ', 'MOVK', 'CBZ', 'CBNZ',
+  'B.EQ', 'B.NE', 'B.HS', 'B.LO', 'B.HI', 'B.LS', 'B.GE', 'B.LT',
+  'B.GT', 'B.LE', 'B.MI', 'B.PL', 'B.VS', 'B.VC', 'B', 'BR', 'BL',
+  'CMP', 'CMPI', 'MOV', 'MUL', 'LDA', 'PUTINT', 'STOP',
+]);
+const INSTRUCTION_DOCS = [
+  ['ADD', 'Adds two registers and writes the result.', 'ADD X0, X1, X2'],
+  ['ADDS', 'Adds two registers and updates NZCV flags.', 'ADDS X0, X1, X2'],
+  ['ADDI', 'Adds an immediate value to a register.', 'ADDI X0, X1, #16'],
+  ['ADDIS', 'Adds an immediate value and updates NZCV flags.', 'ADDIS X0, X1, #1'],
+  ['SUB', 'Subtracts one register from another.', 'SUB X0, X1, X2'],
+  ['SUBS', 'Subtracts and updates NZCV flags.', 'SUBS X0, X1, X2'],
+  ['SUBI', 'Subtracts an immediate value from a register.', 'SUBI X0, X1, #8'],
+  ['SUBIS', 'Subtracts an immediate value and updates NZCV flags.', 'SUBIS X0, X1, #1'],
+  ['AND', 'Bitwise AND between two registers.', 'AND X0, X1, X2'],
+  ['ANDS', 'Bitwise AND and updates N and Z flags.', 'ANDS X0, X1, X2'],
+  ['ANDI', 'Bitwise AND with an immediate mask.', 'ANDI X0, X1, #255'],
+  ['ANDIS', 'Bitwise AND with an immediate mask and updates N and Z.', 'ANDIS X0, X1, #255'],
+  ['ORR', 'Bitwise OR between two registers.', 'ORR X0, X1, X2'],
+  ['ORRI', 'Bitwise OR with an immediate mask.', 'ORRI X0, X1, #1'],
+  ['EOR', 'Bitwise exclusive OR between two registers.', 'EOR X0, X1, X2'],
+  ['EORI', 'Bitwise exclusive OR with an immediate mask.', 'EORI X0, X1, #1'],
+  ['LSL', 'Logical shift left by an immediate amount.', 'LSL X0, X1, #3'],
+  ['LSR', 'Logical shift right by an immediate amount.', 'LSR X0, X1, #2'],
+  ['LDUR', 'Loads a full register-sized value from memory.', 'LDUR X0, [SP, #8]'],
+  ['STUR', 'Stores a full register-sized value to memory.', 'STUR X0, [SP, #8]'],
+  ['LDURSW', 'Loads a 32-bit word and sign-extends it to 64 bits.', 'LDURSW X0, [X1, #0]'],
+  ['STURW', 'Stores the low 32 bits of a register.', 'STURW X0, [X1, #0]'],
+  ['LDURH', 'Loads a 16-bit halfword and zero-extends it.', 'LDURH X0, [X1, #2]'],
+  ['STURH', 'Stores the low 16 bits of a register.', 'STURH X0, [X1, #2]'],
+  ['LDURB', 'Loads a byte and zero-extends it.', 'LDURB X0, [X1, #0]'],
+  ['STURB', 'Stores the low 8 bits of a register.', 'STURB X0, [X1, #0]'],
+  ['LDXR', 'Loads from memory for an exclusive-access style sequence.', 'LDXR X0, [X1, #0]'],
+  ['STXR', 'Stores to memory and writes a success status register.', 'STXR X2, X0, [X1, #0]'],
+  ['MOVZ', 'Moves a 16-bit immediate into a register and clears the rest.', 'MOVZ X0, #42, LSL #16'],
+  ['MOVK', 'Patches a 16-bit immediate into part of an existing register.', 'MOVK X0, #1, LSL #0'],
+  ['CBZ', 'Branches when a register is zero.', 'CBZ X0, done'],
+  ['CBNZ', 'Branches when a register is not zero.', 'CBNZ X0, loop'],
+  ['B.EQ', 'Branches when Z is set.', 'B.EQ equal_label'],
+  ['B.NE', 'Branches when Z is clear.', 'B.NE not_equal'],
+  ['B.HS', 'Branches when carry is set.', 'B.HS carry_or_same'],
+  ['B.LO', 'Branches when carry is clear.', 'B.LO lower'],
+  ['B.HI', 'Branches when C is set and Z is clear.', 'B.HI higher'],
+  ['B.LS', 'Branches when C is clear or Z is set.', 'B.LS lower_or_same'],
+  ['B.GE', 'Branches when the signed comparison is greater-than-or-equal.', 'B.GE ge_label'],
+  ['B.LT', 'Branches when the signed comparison is less-than.', 'B.LT lt_label'],
+  ['B.GT', 'Branches when the signed comparison is greater-than.', 'B.GT gt_label'],
+  ['B.LE', 'Branches when the signed comparison is less-than-or-equal.', 'B.LE le_label'],
+  ['B.MI', 'Branches when the negative flag is set.', 'B.MI negative_case'],
+  ['B.PL', 'Branches when the negative flag is clear.', 'B.PL non_negative'],
+  ['B.VS', 'Branches when overflow is set.', 'B.VS overflow_case'],
+  ['B.VC', 'Branches when overflow is clear.', 'B.VC no_overflow'],
+  ['B', 'Unconditionally branches to a label.', 'B loop'],
+  ['BR', 'Branches to the address held in a register.', 'BR LR'],
+  ['BL', 'Branches to a label and stores the return PC in LR.', 'BL factorial'],
+  ['CMP', 'Compares a register against a register or immediate by updating flags.', 'CMP X0, #1'],
+  ['CMPI', 'Compares a register against an immediate by updating flags.', 'CMPI X0, #1'],
+  ['MOV', 'Copies an immediate or register value into the destination.', 'MOV X0, #1024'],
+  ['MUL', 'Multiplies two registers.', 'MUL X1, X1, X0'],
+  ['LDA', 'Loads an immediate or label address into a register.', 'LDA X0, arr1'],
+  ['PUTINT', 'Appends a register value to the mini console output.', 'PUTINT X0'],
+  ['STOP', 'Halts the simulator immediately.', 'STOP'],
+];
+const INSTRUCTION_DOC_MAP = Object.fromEntries(
+  INSTRUCTION_DOCS.map(([opcode, summary, example]) => [opcode, { opcode, summary, example }]),
+);
+
+function sanitizeCommentNote(note) {
+  return note.replace(/\*\/$/, '').trim();
+}
 
 function splitArgs(argsStr) {
   const args = [];
@@ -92,7 +173,7 @@ function splitArgs(argsStr) {
 }
 
 function normalizeToken(token) {
-  return token.replace(/[\[\]]/g, '').trim();
+  return token.replace(/\[|\]/g, '').trim();
 }
 
 function escapeHtml(value) {
@@ -101,10 +182,6 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function getRegisterMatches(text) {
-  return [...text.matchAll(REGISTER_PATTERN)].map((match) => match[1].toUpperCase());
 }
 
 function pushHistoryEntry(historyRef, entry) {
@@ -191,6 +268,165 @@ function stripComments(text) {
   }
 
   return output;
+}
+
+function stripCommentFromLine(line, initialInBlockComment = false) {
+  const { codePart, inBlockComment } = splitLineIntoCodeAndComment(line, initialInBlockComment);
+  return { codePart, inBlockComment };
+}
+
+function getInstructionDoc(opcode) {
+  return INSTRUCTION_DOC_MAP[opcode?.toUpperCase()] ?? null;
+}
+
+function buildFallbackInstructionDoc(opcode, example = '') {
+  if (!opcode) return null;
+  return {
+    opcode: opcode.toUpperCase(),
+    summary: 'This instruction is currently unsupported by the simulator.',
+    example: example || `${opcode.toUpperCase()} ...`,
+  };
+}
+
+function getInstructionDocsForDisplay(code) {
+  const docs = INSTRUCTION_DOCS.map(([opcode, summary, example]) => ({
+    opcode,
+    summary,
+    example,
+    supported: IMPLEMENTED_INSTRUCTIONS.has(opcode),
+  }));
+  const seen = new Set(docs.map((doc) => doc.opcode));
+
+  getParsedSourceLines(code).forEach((line) => {
+    if (!line.isPotentialInstruction || seen.has(line.opcode)) return;
+    docs.push({
+      ...buildFallbackInstructionDoc(line.opcode, line.codePart.trim()),
+      supported: false,
+    });
+    seen.add(line.opcode);
+  });
+
+  return docs;
+}
+
+function getParsedSourceLines(code) {
+  const lines = code.split('\n');
+  const parsedLines = [];
+  let inBlockComment = false;
+
+  lines.forEach((line, index) => {
+    const { codePart, inBlockComment: nextInBlockComment } = stripCommentFromLine(line, inBlockComment);
+    inBlockComment = nextInBlockComment;
+    const trimmed = codePart.trim();
+    const labelMatch = trimmed.match(/^([A-Za-z_]\w*:)(.*)$/);
+    const codeWithoutLabel = labelMatch ? labelMatch[2].trim() : trimmed;
+    const instMatch = codeWithoutLabel.match(/^(\S+)(?:\s+(.*))?$/);
+    const opcode = instMatch?.[1]?.toUpperCase() ?? null;
+
+    parsedLines.push({
+      lineNumber: index + 1,
+      raw: line,
+      codePart,
+      commentPart: line.slice(codePart.length),
+      opcode,
+      argsStr: instMatch?.[2]?.trim() ?? '',
+      isPotentialInstruction: Boolean(opcode),
+      isSupported: !opcode || IMPLEMENTED_INSTRUCTIONS.has(opcode),
+    });
+  });
+
+  return parsedLines;
+}
+
+function getInstructionInfoAtSelection(value, selectionStart) {
+  const lines = getParsedSourceLines(value);
+  let offset = 0;
+
+  for (const line of lines) {
+    const lineEnd = offset + line.raw.length;
+    const isTargetLine =
+      selectionStart >= offset && (selectionStart <= lineEnd || (selectionStart === value.length && lineEnd === value.length));
+    if (!isTargetLine) {
+      offset = lineEnd + 1;
+      continue;
+    }
+
+    if (!line.opcode) return null;
+    const opcodeIndex = line.codePart.toUpperCase().indexOf(line.opcode);
+    if (opcodeIndex === -1) return null;
+    const absoluteOpcodeStart = offset + opcodeIndex;
+    const absoluteOpcodeEnd = absoluteOpcodeStart + line.opcode.length;
+    const isInsideOpcode = selectionStart >= absoluteOpcodeStart && selectionStart <= absoluteOpcodeEnd;
+    return isInsideOpcode
+      ? (getInstructionDoc(line.opcode) ?? buildFallbackInstructionDoc(line.opcode, line.codePart.trim()))
+      : null;
+  }
+
+  return null;
+}
+
+function toUnsigned32(value) {
+  return value >>> 0;
+}
+
+function signExtend32(value) {
+  const masked = toUnsigned32(value);
+  return masked & 0x80000000 ? masked - 0x100000000 : masked;
+}
+
+function unsignedRightShift64ish(value, amount) {
+  return Math.floor(toUnsigned32(value) / (2 ** amount));
+}
+
+function getArithmeticFlagsFromAdd(a, b, result) {
+  const unsignedA = BigInt.asUintN(64, BigInt(Math.trunc(a)));
+  const unsignedB = BigInt.asUintN(64, BigInt(Math.trunc(b)));
+  const unsignedSum = unsignedA + unsignedB;
+  const signedA = BigInt.asIntN(64, BigInt(Math.trunc(a)));
+  const signedB = BigInt.asIntN(64, BigInt(Math.trunc(b)));
+  const signedResult = BigInt.asIntN(64, signedA + signedB);
+
+  return {
+    N: result < 0 ? 1 : 0,
+    Z: result === 0 ? 1 : 0,
+    C: unsignedSum > ((1n << 64n) - 1n) ? 1 : 0,
+    V:
+      (signedA >= 0n && signedB >= 0n && signedResult < 0n)
+      || (signedA < 0n && signedB < 0n && signedResult >= 0n)
+        ? 1
+        : 0,
+  };
+}
+
+function getArithmeticFlagsFromSub(a, b, result) {
+  const unsignedA = BigInt.asUintN(64, BigInt(Math.trunc(a)));
+  const unsignedB = BigInt.asUintN(64, BigInt(Math.trunc(b)));
+  const signedA = BigInt.asIntN(64, BigInt(Math.trunc(a)));
+  const signedB = BigInt.asIntN(64, BigInt(Math.trunc(b)));
+  const signedResult = BigInt.asIntN(64, signedA - signedB);
+
+  return {
+    N: result < 0 ? 1 : 0,
+    Z: result === 0 ? 1 : 0,
+    C: unsignedA >= unsignedB ? 1 : 0,
+    V:
+      (signedA >= 0n && signedB < 0n && signedResult < 0n)
+      || (signedA < 0n && signedB >= 0n && signedResult >= 0n)
+        ? 1
+        : 0,
+  };
+}
+
+function getLogicalFlags(result, previousFlags) {
+  return {
+    ...previousFlags,
+    N: result < 0 ? 1 : 0,
+    Z: result === 0 ? 1 : 0,
+  };
+}
+
+function isRegisterOutOfRange(value) {
+  return !Number.isFinite(value) || value < INT64_MIN || value > INT64_MAX;
 }
 
 function splitLineIntoCodeAndComment(line, initialInBlockComment = false) {
@@ -302,16 +538,14 @@ function collectRegisterNotes(code) {
   let inBlockComment = false;
 
   code.split('\n').forEach((line) => {
-    const { codePart, commentPart, inBlockComment: nextInBlockComment } =
+    const { commentPart, inBlockComment: nextInBlockComment } =
       splitLineIntoCodeAndComment(line, inBlockComment);
     inBlockComment = nextInBlockComment;
     if (!commentPart.trim()) return;
 
     for (const match of commentPart.matchAll(/@((?:X(?:[12]?\d|3[01]|ZR)|SP|FP|LR))\s*:?\s*([^@]+)/gi)) {
       const registerName = match[1].toUpperCase();
-      const note = match[2]
-        .replace(/\*\/$/, '')
-        .trim();
+      const note = sanitizeCommentNote(match[2]);
       if (!note) continue;
       if (!notes[registerName]) notes[registerName] = [];
       notes[registerName].push(note);
@@ -321,7 +555,7 @@ function collectRegisterNotes(code) {
   return notes;
 }
 
-function highlightCodeSegment(segment, mutatedRegisters, showMutationHints, showWhitespace, registerNotes) {
+function highlightCodeSegment(segment, showWhitespace, registerNotes) {
   const escapedSegment = escapeHtml(segment);
   const labelMatch = escapedSegment.match(/^(\s*[A-Za-z_]\w*:)(.*)$/);
   const labelPrefix = labelMatch ? `<span class="token-label">${labelMatch[1]}</span>` : '';
@@ -332,10 +566,9 @@ function highlightCodeSegment(segment, mutatedRegisters, showMutationHints, show
     (match, registerMatch, opcodeMatch) => {
       if (registerMatch) {
         const normalized = registerMatch.toUpperCase();
-        const isMutated = showMutationHints && mutatedRegisters.has(normalized);
         const note = registerNotes[normalized];
         const title = note?.length ? ` title="${escapeHtml(note.join('\n'))}"` : '';
-        return `<span class="token-register${isMutated ? ' token-register-mutated' : ''}"${title}>${match}</span>`;
+        return `<span class="token-register"${title}>${match}</span>`;
       }
 
       if (match.startsWith('#')) {
@@ -351,8 +584,6 @@ function highlightCodeSegment(segment, mutatedRegisters, showMutationHints, show
 
 function highlightSource(code, options = {}) {
   const {
-    mutatedRegisters = new Set(),
-    showMutationHints = false,
     showWhitespace = false,
     registerNotes = {},
   } = options;
@@ -365,8 +596,6 @@ function highlightSource(code, options = {}) {
     if (!buffer) return;
     html += highlightCodeSegment(
       buffer,
-      mutatedRegisters,
-      showMutationHints,
       showWhitespace,
       registerNotes,
     );
@@ -480,10 +709,29 @@ function getInitialState() {
     regs,
     flags: { N: 0, Z: 0, C: 0, V: 0 },
     memory: {},
+    memoryNotes: {},
     consoleOutput: [],
     halted: false,
-    lastMutatedRegisters: [],
   };
+}
+
+function collectMemoryNotes(code) {
+  const notesByLine = {};
+  let inBlockComment = false;
+
+  code.split('\n').forEach((line, index) => {
+    const { commentPart, inBlockComment: nextInBlockComment } =
+      splitLineIntoCodeAndComment(line, inBlockComment);
+    inBlockComment = nextInBlockComment;
+    if (!commentPart.trim()) return;
+
+    const match = commentPart.match(/@memory\s+([^@]+)/i);
+    if (!match) return;
+    const note = sanitizeCommentNote(match[1]);
+    if (note) notesByLine[index + 1] = note;
+  });
+
+  return notesByLine;
 }
 
 function parseDataSection(dataInput) {
@@ -658,21 +906,65 @@ function getLrFinalPc(inst, regs, memory) {
   return null;
 }
 
-function getMutatedRegisters(previousRegs, nextRegs) {
-  const mutated = [];
-  for (let i = 0; i < 31; i += 1) {
-    if (previousRegs[i] !== nextRegs[i]) mutated.push(i);
-  }
-  return mutated;
+function resolveBranchTarget(labelMap, label) {
+  if (labelMap[label] === undefined) throw new Error(`Label ${label} not found`);
+  return labelMap[label];
 }
 
-function getRegisterNames(indexes) {
-  return new Set(indexes.map((index) => {
-    if (index === 28) return 'SP';
-    if (index === 29) return 'FP';
-    if (index === 30) return 'LR';
-    return `X${index}`;
-  }));
+function getPredictedNextPc(prog, labelMap, state) {
+  if (state.halted || state.pc / 4 >= prog.length) return null;
+
+  const inst = prog[state.pc / 4];
+  const args = splitArgs(inst.argsStr ?? '').map(normalizeToken);
+  const readReg = (registerName) => {
+    const ref = parseRegisterReference(registerName);
+    if (!ref) throw new Error(`Invalid register ${registerName}`);
+    return ref.index === 31 ? 0 : (state.regs[ref.index] ?? 0);
+  };
+
+  switch (inst.opcode) {
+    case 'B':
+    case 'BL':
+      return resolveBranchTarget(labelMap, args[0]);
+    case 'BR':
+      return readReg(args[0]);
+    case 'B.EQ':
+      return state.flags.Z ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.NE':
+      return !state.flags.Z ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.HS':
+      return state.flags.C ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.LO':
+      return !state.flags.C ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.HI':
+      return state.flags.C && !state.flags.Z ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.LS':
+      return !state.flags.C || state.flags.Z ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.LT':
+      return state.flags.N !== state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.LE':
+      return state.flags.Z || state.flags.N !== state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.GT':
+      return !state.flags.Z && state.flags.N === state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.GE':
+      return state.flags.N === state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.MI':
+      return state.flags.N ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.PL':
+      return !state.flags.N ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.VS':
+      return state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'B.VC':
+      return !state.flags.V ? resolveBranchTarget(labelMap, args[0]) : inst.pc + 4;
+    case 'CBZ':
+      return readReg(args[0]) === 0 ? resolveBranchTarget(labelMap, args[1]) : inst.pc + 4;
+    case 'CBNZ':
+      return readReg(args[0]) !== 0 ? resolveBranchTarget(labelMap, args[1]) : inst.pc + 4;
+    case 'STOP':
+      return null;
+    default:
+      return inst.pc + 4;
+  }
 }
 
 function getSelectionLineRange(value, start, end) {
@@ -697,12 +989,9 @@ function indentSelectedLines(value, start, end, shouldOutdent = false) {
       return `${TAB_SPACES}${line}`;
     }
 
-    let removed = 0;
-    if (line.startsWith(TAB_SPACES)) removed = TAB_SPACES.length;
-    else {
-      const leadingSpaces = line.match(/^ +/)?.[0].length ?? 0;
-      removed = Math.min(leadingSpaces, TAB_SPACES.length);
-    }
+    const removed = line.startsWith(TAB_SPACES)
+      ? TAB_SPACES.length
+      : Math.min(line.match(/^ +/)?.[0].length ?? 0, TAB_SPACES.length);
     if (removed > 0 && index === 0) nextSelectionStart = Math.max(lineStart, nextSelectionStart - removed);
     nextSelectionEnd = Math.max(lineStart, nextSelectionEnd - removed);
     return line.slice(removed);
@@ -773,9 +1062,11 @@ function getInstructionRegisterUsage(inst) {
 
   switch (opcode) {
     case 'ADD':
+    case 'ADDS':
     case 'SUB':
     case 'MUL':
     case 'AND':
+    case 'ANDS':
     case 'ORR':
     case 'EOR':
     case 'LSL':
@@ -785,12 +1076,16 @@ function getInstructionRegisterUsage(inst) {
       addRef(usage.source, args[2]);
       break;
     case 'ADDI':
+    case 'ADDIS':
     case 'SUBI':
     case 'ANDI':
+    case 'ANDIS':
     case 'ORRI':
     case 'EORI':
     case 'MOV':
     case 'LDA':
+    case 'MOVZ':
+    case 'MOVK':
       addRef(usage.destination, args[0]);
       if (args[1] && !args[1].startsWith('#')) addRef(usage.source, args[1]);
       break;
@@ -816,6 +1111,8 @@ function getInstructionRegisterUsage(inst) {
       usage.destination.add(30);
       break;
     case 'LDUR':
+    case 'LDURSW':
+    case 'LDURH':
     case 'LDURB': {
       const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
       if (match) {
@@ -825,11 +1122,30 @@ function getInstructionRegisterUsage(inst) {
       break;
     }
     case 'STUR':
+    case 'STURW':
+    case 'STURH':
     case 'STURB': {
       const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
       if (match) {
         addRef(usage.source, match[1]);
         addRef(usage.source, match[2]);
+      }
+      break;
+    }
+    case 'LDXR': {
+      const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
+      if (match) {
+        addRef(usage.destination, match[1]);
+        addRef(usage.source, match[2]);
+      }
+      break;
+    }
+    case 'STXR': {
+      const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
+      if (match) {
+        addRef(usage.destination, match[1]);
+        addRef(usage.source, match[2]);
+        addRef(usage.source, match[3]);
       }
       break;
     }
@@ -853,10 +1169,14 @@ export default function App() {
   const [stackFormat, setStackFormat] = useState('decimal');
   const [dataDirective, setDataDirective] = useState('.long');
   const [dataStride, setDataStride] = useState(8);
+  const [stackStride, setStackStride] = useState(8);
   const [showWhitespace, setShowWhitespace] = useState(false);
-  const [showMutationHints, setShowMutationHints] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [showDocumentation, setShowDocumentation] = useState(false);
   const [activeRegisterNote, setActiveRegisterNote] = useState(null);
+  const [activeInstructionDoc, setActiveInstructionDoc] = useState(null);
+  const [loadedDataMemory, setLoadedDataMemory] = useState({});
+  const [executionHistoryDepth, setExecutionHistoryDepth] = useState(0);
   const traceListRef = useRef(null);
   const sourceEditorRef = useRef(null);
   const dataEditorRef = useRef(null);
@@ -880,33 +1200,35 @@ export default function App() {
   const handleExecutionUndo = () => {
     const previousState = executionHistoryRef.current.pop();
     if (!previousState) return;
+    setExecutionHistoryDepth(executionHistoryRef.current.length);
     setMachineState(previousState);
     setError('');
   };
 
+  const handleGlobalShortcut = useEffectEvent((event) => {
+    if (event.defaultPrevented || !event.altKey) return;
+    const key = event.key.toLowerCase();
+
+    if (key === 'a') {
+      event.preventDefault();
+      handleAssemble();
+    } else if (key === 'r' && assembled && !machineState.halted) {
+      event.preventDefault();
+      handleRun();
+    } else if (key === 's' && assembled && !machineState.halted) {
+      event.preventDefault();
+      handleStep();
+    } else if (key === 'z' && executionHistoryRef.current.length) {
+      event.preventDefault();
+      handleExecutionUndo();
+    }
+  });
+
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.defaultPrevented || !event.altKey) return;
-      const key = event.key.toLowerCase();
-
-      if (key === 'a') {
-        event.preventDefault();
-        handleAssemble();
-      } else if (key === 'r' && assembled && !machineState.halted) {
-        event.preventDefault();
-        handleRun();
-      } else if (key === 's' && assembled && !machineState.halted) {
-        event.preventDefault();
-        handleStep();
-      } else if (key === 'z' && executionHistoryRef.current.length) {
-        event.preventDefault();
-        handleExecutionUndo();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [assembled, machineState.halted, machineState]);
+    const onKeyDown = (event) => handleGlobalShortcut(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const syncSourceScroll = () => {
     if (!sourceEditorRef.current || !sourceHighlightRef.current || !sourceLineNumbersRef.current) return;
@@ -918,6 +1240,7 @@ export default function App() {
   const updateActiveRegisterNote = (element, nextValue = sourceCode) => {
     if (!element) {
       setActiveRegisterNote(null);
+      setActiveInstructionDoc(null);
       return;
     }
 
@@ -930,6 +1253,9 @@ export default function App() {
         nextRegisterNotes,
       ),
     );
+    setActiveInstructionDoc(
+      getInstructionInfoAtSelection(nextValue, element.selectionStart ?? 0),
+    );
   };
 
   const commitSourceChange = (nextValue, options = {}) => {
@@ -939,6 +1265,7 @@ export default function App() {
     setSourceCode(nextValue);
     setAssembled(false);
     setActiveRegisterNote(null);
+    setActiveInstructionDoc(null);
     if (typeof selectionStart === 'number') {
       queueSelectionRestore(sourceEditorRef, selectionStart, selectionEnd ?? selectionStart);
       window.requestAnimationFrame(() => updateActiveRegisterNote(sourceEditorRef.current, nextValue));
@@ -1030,16 +1357,16 @@ export default function App() {
     else undoEditorChange('data');
   };
 
-  const handleAssemble = () => {
+  function handleAssemble() {
     try {
-      const originalLines = sourceCode.split('\n');
-      const lines = stripComments(sourceCode).split('\n');
+      const lines = getParsedSourceLines(sourceCode);
+      const memoryNotesByLine = collectMemoryNotes(sourceCode);
       const nextProgram = [];
       const nextCodeLabels = {};
       let instIndex = 0;
 
       for (let i = 0; i < lines.length; i += 1) {
-        let line = lines[i].trim();
+        let line = lines[i].codePart.trim();
         if (!line) continue;
 
         const labelMatch = line.match(/^([a-zA-Z_]\w*):(.*)/);
@@ -1057,9 +1384,10 @@ export default function App() {
         nextProgram.push({
           opcode: instMatch[1].toUpperCase(),
           argsStr: instMatch[2]?.trim() ?? '',
-          original: originalLines[i].trim(),
-          lineNum: i + 1,
+          original: lines[i].raw.trim(),
+          lineNum: lines[i].lineNumber,
           pc: instIndex * 4,
+          memoryNote: memoryNotesByLine[lines[i].lineNumber] ?? '',
         });
         instIndex += 1;
       }
@@ -1071,11 +1399,13 @@ export default function App() {
       }
 
       executionHistoryRef.current = [];
+      setExecutionHistoryDepth(0);
       setProgram(nextProgram);
       setLabels({ ...nextCodeLabels, ...dataLabels });
       setBreakpoints([]);
       setAssembled(true);
       setMachineState({ ...getInitialState(), memory: dataMemory });
+      setLoadedDataMemory(dataMemory);
       setDataDirective(directive);
       setDataStride(stride);
       setError('');
@@ -1083,7 +1413,7 @@ export default function App() {
       setError(`Assembly Error: ${err.message}`);
       setAssembled(false);
     }
-  };
+  }
 
   const executeStep = (prog, labelMap, state) => {
     if (state.pc / 4 >= prog.length || state.halted) {
@@ -1091,11 +1421,19 @@ export default function App() {
     }
 
     const inst = prog[state.pc / 4];
-    const { pc, regs, flags, memory, consoleOutput } = state;
+    const {
+      pc,
+      regs,
+      flags,
+      memory,
+      memoryNotes,
+      consoleOutput,
+    } = state;
     let nextPc = pc + 4;
     const newRegs = [...regs];
     const newFlags = { ...flags };
     const newMem = { ...memory };
+    const newMemoryNotes = { ...memoryNotes };
     const newConsoleOutput = [...consoleOutput];
 
     const writeReg = (registerName, value) => {
@@ -1122,6 +1460,30 @@ export default function App() {
       return parsed;
     };
 
+    const parseMovWideArgs = (argsList) => {
+      const dest = argsList[0];
+      const immediate = parseImm(argsList[1]);
+      let shift = 0;
+
+      if (argsList[2]) {
+        const shiftMatch = argsList[2].match(/^LSL\s+(#-?\d+)$/i);
+        if (!shiftMatch) throw new Error('Expected shift syntax: LSL #imm');
+        shift = parseImm(shiftMatch[1]);
+      }
+
+      return { dest, immediate, shift };
+    };
+
+    const parseMemoryOperand = (argsText) => {
+      const match = argsText.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
+      if (!match) throw new Error('Invalid syntax. Expected: OP Xt, [Xn, #offset]');
+      return {
+        target: match[1],
+        base: match[2],
+        offset: match[3] ? Number.parseInt(match[3], 10) : 0,
+      };
+    };
+
     const readOperand = (operand) => (
       normalizeToken(operand).startsWith('#') ? parseImm(operand) : readReg(operand)
     );
@@ -1134,6 +1496,12 @@ export default function App() {
         case 'ADD':
           writeReg(args[0], readReg(args[1]) + readReg(args[2]));
           break;
+        case 'ADDS': {
+          const result = readReg(args[1]) + readReg(args[2]);
+          writeReg(args[0], result);
+          Object.assign(newFlags, getArithmeticFlagsFromAdd(readReg(args[1]), readReg(args[2]), result));
+          break;
+        }
         case 'SUB':
           writeReg(args[0], readReg(args[1]) - readReg(args[2]));
           break;
@@ -1141,6 +1509,15 @@ export default function App() {
           const bracketOperand = rawArgs[1] ? parseRegisterImmediateOperand(rawArgs[1]) : null;
           if (args.length === 2 && bracketOperand) writeReg(args[0], readReg(bracketOperand.register) + parseImm(bracketOperand.immediate));
           else writeReg(args[0], readReg(args[1]) + readOperand(args[2]));
+          break;
+        }
+        case 'ADDIS': {
+          const bracketOperand = rawArgs[1] ? parseRegisterImmediateOperand(rawArgs[1]) : null;
+          const operandA = args.length === 2 && bracketOperand ? readReg(bracketOperand.register) : readReg(args[1]);
+          const operandB = args.length === 2 && bracketOperand ? parseImm(bracketOperand.immediate) : readOperand(args[2]);
+          const result = operandA + operandB;
+          writeReg(args[0], result);
+          Object.assign(newFlags, getArithmeticFlagsFromAdd(operandA, operandB, result));
           break;
         }
         case 'SUBI': {
@@ -1155,6 +1532,12 @@ export default function App() {
         case 'AND':
           writeReg(args[0], readReg(args[1]) & readReg(args[2]));
           break;
+        case 'ANDS': {
+          const result = readReg(args[1]) & readReg(args[2]);
+          writeReg(args[0], result);
+          Object.assign(newFlags, getLogicalFlags(result, newFlags));
+          break;
+        }
         case 'ORR':
           writeReg(args[0], readReg(args[1]) | readReg(args[2]));
           break;
@@ -1164,6 +1547,12 @@ export default function App() {
         case 'ANDI':
           writeReg(args[0], readReg(args[1]) & parseImm(args[2]));
           break;
+        case 'ANDIS': {
+          const result = readReg(args[1]) & parseImm(args[2]);
+          writeReg(args[0], result);
+          Object.assign(newFlags, getLogicalFlags(result, newFlags));
+          break;
+        }
         case 'ORRI':
           writeReg(args[0], readReg(args[1]) | parseImm(args[2]));
           break;
@@ -1174,36 +1563,41 @@ export default function App() {
           writeReg(args[0], readReg(args[1]) << parseImm(args[2]));
           break;
         case 'LSR':
-          writeReg(args[0], readReg(args[1]) >>> parseImm(args[2]));
+          writeReg(args[0], unsignedRightShift64ish(readReg(args[1]), parseImm(args[2])));
           break;
         case 'SUBS': {
-          const result = readReg(args[1]) - readReg(args[2]);
+          const operandA = readReg(args[1]);
+          const operandB = readReg(args[2]);
+          const result = operandA - operandB;
           writeReg(args[0], result);
-          newFlags.Z = result === 0 ? 1 : 0;
-          newFlags.N = result < 0 ? 1 : 0;
+          Object.assign(newFlags, getArithmeticFlagsFromSub(operandA, operandB, result));
           break;
         }
         case 'SUBIS': {
           const bracketOperand = rawArgs[1] ? parseRegisterImmediateOperand(rawArgs[1]) : null;
-          const result = args.length === 2 && bracketOperand
-            ? readReg(bracketOperand.register) - parseImm(bracketOperand.immediate)
-            : readReg(args[1]) - readOperand(args[2]);
+          const operandA = args.length === 2 && bracketOperand
+            ? readReg(bracketOperand.register)
+            : readReg(args[1]);
+          const operandB = args.length === 2 && bracketOperand
+            ? parseImm(bracketOperand.immediate)
+            : readOperand(args[2]);
+          const result = operandA - operandB;
           writeReg(args[0], result);
-          newFlags.Z = result === 0 ? 1 : 0;
-          newFlags.N = result < 0 ? 1 : 0;
+          Object.assign(newFlags, getArithmeticFlagsFromSub(operandA, operandB, result));
           break;
         }
         case 'CMP': {
+          const operand1 = readReg(args[0]);
           const operand2 = args[1].includes('#') ? parseImm(args[1]) : readReg(args[1]);
-          const result = readReg(args[0]) - operand2;
-          newFlags.Z = result === 0 ? 1 : 0;
-          newFlags.N = result < 0 ? 1 : 0;
+          const result = operand1 - operand2;
+          Object.assign(newFlags, getArithmeticFlagsFromSub(operand1, operand2, result));
           break;
         }
         case 'CMPI': {
-          const result = readReg(args[0]) - parseImm(args[1]);
-          newFlags.Z = result === 0 ? 1 : 0;
-          newFlags.N = result < 0 ? 1 : 0;
+          const operand1 = readReg(args[0]);
+          const operand2 = parseImm(args[1]);
+          const result = operand1 - operand2;
+          Object.assign(newFlags, getArithmeticFlagsFromSub(operand1, operand2, result));
           break;
         }
         case 'B':
@@ -1224,17 +1618,41 @@ export default function App() {
         case 'B.NE':
           if (!flags.Z) nextPc = labelMap[args[0]];
           break;
+        case 'B.HS':
+          if (flags.C) nextPc = labelMap[args[0]];
+          break;
+        case 'B.LO':
+          if (!flags.C) nextPc = labelMap[args[0]];
+          break;
+        case 'B.HI':
+          if (flags.C && !flags.Z) nextPc = labelMap[args[0]];
+          break;
+        case 'B.LS':
+          if (!flags.C || flags.Z) nextPc = labelMap[args[0]];
+          break;
         case 'B.LT':
-          if (flags.N) nextPc = labelMap[args[0]];
+          if (flags.N !== flags.V) nextPc = labelMap[args[0]];
           break;
         case 'B.LE':
-          if (flags.N || flags.Z) nextPc = labelMap[args[0]];
+          if (flags.Z || flags.N !== flags.V) nextPc = labelMap[args[0]];
           break;
         case 'B.GT':
-          if (!flags.N && !flags.Z) nextPc = labelMap[args[0]];
+          if (!flags.Z && flags.N === flags.V) nextPc = labelMap[args[0]];
           break;
         case 'B.GE':
+          if (flags.N === flags.V) nextPc = labelMap[args[0]];
+          break;
+        case 'B.MI':
+          if (flags.N) nextPc = labelMap[args[0]];
+          break;
+        case 'B.PL':
           if (!flags.N) nextPc = labelMap[args[0]];
+          break;
+        case 'B.VS':
+          if (flags.V) nextPc = labelMap[args[0]];
+          break;
+        case 'B.VC':
+          if (!flags.V) nextPc = labelMap[args[0]];
           break;
         case 'CBZ':
           if (readReg(args[0]) === 0) nextPc = labelMap[args[1]];
@@ -1245,6 +1663,19 @@ export default function App() {
         case 'MOV':
           writeReg(args[0], args[1].startsWith('#') ? parseImm(args[1]) : readReg(args[1]));
           break;
+        case 'MOVZ': {
+          const { dest, immediate, shift } = parseMovWideArgs(args);
+          writeReg(dest, (immediate & 0xffff) * (2 ** shift));
+          break;
+        }
+        case 'MOVK': {
+          const { dest, immediate, shift } = parseMovWideArgs(args);
+          const current = readReg(dest);
+          const fieldMask = 0xffff * (2 ** shift);
+          const patchedValue = (current - (current & fieldMask)) + ((immediate & 0xffff) * (2 ** shift));
+          writeReg(dest, patchedValue);
+          break;
+        }
         case 'LDA':
           if (args[1].startsWith('#')) writeReg(args[0], parseImm(args[1]));
           else {
@@ -1261,33 +1692,53 @@ export default function App() {
             regs: newRegs,
             flags: newFlags,
             memory: newMem,
+            memoryNotes: newMemoryNotes,
             consoleOutput: newConsoleOutput,
             halted: true,
-            lastMutatedRegisters: getMutatedRegisters(regs, newRegs),
           };
         case 'LDUR':
+        case 'LDURSW':
+        case 'LDURH':
         case 'LDURB':
-        case 'STUR': {
-          const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
-          if (!match) throw new Error('Invalid syntax. Expected: OP Xt, [Xn, #offset]');
-          const addr = readReg(match[2]) + (match[3] ? Number.parseInt(match[3], 10) : 0);
-          if (inst.opcode === 'LDUR') writeReg(match[1], newMem[addr] ?? 0);
-          else if (inst.opcode === 'LDURB') writeReg(match[1], (newMem[addr] || 0) & 0xff);
-          else newMem[addr] = readReg(match[1]);
+        case 'LDXR':
+        case 'STUR':
+        case 'STURW':
+        case 'STURH': {
+          const memoryArgs = parseMemoryOperand(inst.argsStr);
+          const addr = readReg(memoryArgs.base) + memoryArgs.offset;
+          const rawValue = newMem[addr] ?? 0;
+
+          if (inst.opcode === 'LDUR' || inst.opcode === 'LDXR') writeReg(memoryArgs.target, rawValue);
+          else if (inst.opcode === 'LDURSW') writeReg(memoryArgs.target, signExtend32(rawValue));
+          else if (inst.opcode === 'LDURH') writeReg(memoryArgs.target, rawValue & 0xffff);
+          else if (inst.opcode === 'LDURB') writeReg(memoryArgs.target, rawValue & 0xff);
+          else if (inst.opcode === 'STUR') newMem[addr] = readReg(memoryArgs.target);
+          else if (inst.opcode === 'STURW') newMem[addr] = toUnsigned32(readReg(memoryArgs.target));
+          else if (inst.opcode === 'STURH') newMem[addr] = readReg(memoryArgs.target) & 0xffff;
+          if (inst.opcode.startsWith('STUR') && inst.memoryNote) newMemoryNotes[addr] = inst.memoryNote;
           break;
         }
         case 'STURB': {
-          const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
-          if (!match) throw new Error('Invalid syntax. Expected: OP Xt, [Xn, #offset]');
-          const addr = readReg(match[2]) + (match[3] ? Number.parseInt(match[3], 10) : 0);
-          newMem[addr] = readReg(match[1]) & 0xff;
+          const memoryArgs = parseMemoryOperand(inst.argsStr);
+          const addr = readReg(memoryArgs.base) + memoryArgs.offset;
+          newMem[addr] = readReg(memoryArgs.target) & 0xff;
+          if (inst.memoryNote) newMemoryNotes[addr] = inst.memoryNote;
+          break;
+        }
+        case 'STXR': {
+          const match = inst.argsStr.match(/([A-Z0-9]+)\s*,\s*([A-Z0-9]+)\s*,\s*\[([A-Z0-9]+)(?:,\s*#(-?\d+))?\]/i);
+          if (!match) throw new Error('Invalid syntax. Expected: STXR Xs, Xt, [Xn, #offset]');
+          const addr = readReg(match[3]) + (match[4] ? Number.parseInt(match[4], 10) : 0);
+          newMem[addr] = readReg(match[2]);
+          if (inst.memoryNote) newMemoryNotes[addr] = inst.memoryNote;
+          writeReg(match[1], 0);
           break;
         }
         default:
           throw new Error(`Unsupported instruction: ${inst.opcode}`);
       }
     } catch (err) {
-      throw new Error(`Line ${inst.lineNum}: ${err.message}`);
+      throw new Error(`Line ${inst.lineNum}: ${err.message}`, { cause: err });
     }
 
     return {
@@ -1295,26 +1746,28 @@ export default function App() {
       regs: newRegs,
       flags: newFlags,
       memory: newMem,
+      memoryNotes: newMemoryNotes,
       consoleOutput: newConsoleOutput,
       halted: false,
-      lastMutatedRegisters: getMutatedRegisters(regs, newRegs),
     };
   };
 
-  const handleStep = () => {
+  function handleStep() {
     try {
       executionHistoryRef.current.push(machineState);
+      setExecutionHistoryDepth(executionHistoryRef.current.length);
       setMachineState(executeStep(program, labels, machineState));
       setError('');
     } catch (err) {
       setError(`Runtime Error: ${err.message}`);
       setMachineState((state) => ({ ...state, halted: true }));
     }
-  };
+  }
 
-  const handleRun = () => {
+  function handleRun() {
     try {
       executionHistoryRef.current.push(machineState);
+      setExecutionHistoryDepth(executionHistoryRef.current.length);
       let state = machineState;
       let count = 0;
       let skipFirst = breakpoints.includes(state.pc);
@@ -1336,18 +1789,35 @@ export default function App() {
     } catch (err) {
       setError(`Runtime Error: ${err.message}`);
     }
-  };
+  }
 
   const handleReset = () => {
     executionHistoryRef.current = [];
+    setExecutionHistoryDepth(0);
     setMachineState(getInitialState());
     setDataInput('');
+    setLoadedDataMemory({});
     setError('');
   };
 
   const handleClearData = () => {
     setDataInput('');
-    setMachineState((state) => ({ ...state, memory: {} }));
+    setLoadedDataMemory({});
+    setMachineState((state) => ({ ...state, memory: {}, memoryNotes: {} }));
+    setError('');
+  };
+
+  const handleClearStackMemory = () => {
+    setMachineState((state) => ({ ...state, memory: { ...loadedDataMemory }, memoryNotes: {} }));
+    setError('');
+  };
+
+  const handleClearRegisters = () => {
+    const initialState = getInitialState();
+    setMachineState((state) => ({
+      ...state,
+      regs: initialState.regs,
+    }));
     setError('');
   };
 
@@ -1371,19 +1841,18 @@ export default function App() {
   const lrPc = machineState.regs[30];
   const lrInst = program.find((inst) => inst.pc === lrPc);
   const currentInst = assembled && !machineState.halted ? program[machineState.pc / 4] : null;
+  const predictedNextPc = assembled && !machineState.halted
+    ? getPredictedNextPc(program, labels, machineState)
+    : null;
+  const nextInst = assembled && !machineState.halted
+    ? program.find((inst) => inst.pc === predictedNextPc) ?? null
+    : null;
   const currentRegisterUsage = getInstructionRegisterUsage(currentInst);
   const stackOffsetPointer = getStackOffsetPointer(currentInst, machineState.regs);
   const stackFinalPointer = getStackFinalPointer(currentInst, machineState.regs, machineState.memory);
   const lrFinalPc = getLrFinalPc(currentInst, machineState.regs, machineState.memory);
   const memoryAddresses = Object.keys(machineState.memory).map(Number).filter((value) => !Number.isNaN(value));
-  const addressStride = Math.min(
-    8,
-    ...memoryAddresses
-      .map((address, index) => (index === 0 ? Infinity : Math.abs(address - memoryAddresses[index - 1])))
-      .filter((value) => Number.isFinite(value) && value > 0),
-    dataStride,
-  );
-  const stackStep = Number.isFinite(addressStride) && addressStride > 0 ? addressStride : 8;
+  const stackStep = stackStride;
   const visibleAnchors = [
     ...memoryAddresses,
     spAligned,
@@ -1414,9 +1883,11 @@ export default function App() {
   const finalSharesFp = finalPointerIdx !== -1 && finalPointerIdx === fpIdx;
   const finalSharesOffset = finalPointerIdx !== -1 && finalPointerIdx === offsetPointerIdx;
   const lrFinalInst = program.find((inst) => inst.pc === lrFinalPc);
-  const sourceLineNumbers = sourceCode.split('\n').map((_, index) => `${index + 1}`).join('\n');
-  const mutatedRegisterNames = getRegisterNames(machineState.lastMutatedRegisters);
+  const sourceInstructionWarnings = getParsedSourceLines(sourceCode).map((line) => (
+    line.isPotentialInstruction && !line.isSupported ? line.opcode : ''
+  ));
   const registerNotes = collectRegisterNotes(sourceCode);
+  const instructionDocs = getInstructionDocsForDisplay(sourceCode);
 
   return (
     <div className="app-shell">
@@ -1441,7 +1912,7 @@ export default function App() {
           <button type="button" className="btn btn-secondary" onClick={handleStep} disabled={!assembled || machineState.halted} title="Alt + S">
             <StepForward size={16} /> Step
           </button>
-          <button type="button" className="btn btn-secondary" onClick={handleExecutionUndo} disabled={!executionHistoryRef.current.length} title="Alt + Z">
+          <button type="button" className="btn btn-secondary" onClick={handleExecutionUndo} disabled={!executionHistoryDepth} title="Alt + Z">
             <StepBack size={16} /> Undo Step
           </button>
           <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={!assembled}>
@@ -1487,16 +1958,15 @@ export default function App() {
                 />
                 <Eye size={14} /> Whitespace
               </label>
-              <label className="toggle-chip">
-                <input
-                  type="checkbox"
-                  checked={showMutationHints}
-                  onChange={(event) => setShowMutationHints(event.target.checked)}
-                />
-                <History size={14} /> Mutations
-              </label>
               <button type="button" className="btn btn-small btn-ghost" onClick={handleFormatSource}>
                 Format
+              </button>
+              <button
+                type="button"
+                className={`btn btn-small btn-ghost${showDocumentation ? ' btn-toggle-active' : ''}`}
+                onClick={() => setShowDocumentation((current) => !current)}
+              >
+                <BookOpen size={14} /> Docs
               </button>
               {!assembled ? <span className="panel-tag">Unassembled</span> : null}
             </div>
@@ -1520,39 +1990,70 @@ export default function App() {
               </div>
             </div>
           ) : null}
-          <div className="source-editor-shell">
-            <pre ref={sourceLineNumbersRef} className="source-line-numbers" aria-hidden="true">
-              {sourceLineNumbers}
-            </pre>
-            <pre
-              ref={sourceHighlightRef}
-              className="source-highlight custom-scrollbar"
-              aria-hidden="true"
-              dangerouslySetInnerHTML={{
-                __html: highlightSource(sourceCode, {
-                  mutatedRegisters: mutatedRegisterNames,
-                  showMutationHints,
-                  showWhitespace,
-                  registerNotes,
-                }),
-              }}
-            />
-            <textarea
-              ref={sourceEditorRef}
-              className="source-editor custom-scrollbar"
-              value={sourceCode}
-              onChange={(event) => commitSourceChange(event.target.value, {
-                snapshot: getEditorSnapshot(event.currentTarget, sourceCode),
+          {showDocumentation ? (
+            <div className="documentation-panel custom-scrollbar">
+              {instructionDocs.map((doc) => {
+                return (
+                  <article key={doc.opcode} className="documentation-card">
+                    <div className="documentation-card-top">
+                      <span className="documentation-opcode">{doc.opcode}</span>
+                      <span className={`documentation-status${doc.supported ? '' : ' documentation-status-unsupported'}`}>
+                        {doc.supported ? 'Supported' : 'Unsupported'}
+                      </span>
+                    </div>
+                    <p className="documentation-summary">{doc.summary}</p>
+                    <code className="documentation-example">{doc.example}</code>
+                  </article>
+                );
               })}
-              onKeyDown={handleSourceKeyDown}
-              onClick={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
-              onKeyUp={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
-              onSelect={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
-              onScroll={syncSourceScroll}
-              spellCheck="false"
-              wrap="off"
-            />
-          </div>
+            </div>
+          ) : (
+            <div className="source-editor-shell">
+              <div ref={sourceLineNumbersRef} className="source-gutter" aria-hidden="true">
+                {sourceCode.split('\n').map((_, index) => {
+                  const warning = sourceInstructionWarnings[index];
+                  return (
+                    <div key={`line-${index + 1}`} className="source-gutter-row">
+                      <span className="source-warning-cell">
+                        {warning ? (
+                          <span className="source-warning-icon" title={`${warning} may be unsupported in the simulator`}>
+                            <AlertTriangle size={12} />
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="source-line-number">{index + 1}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <pre
+                ref={sourceHighlightRef}
+                className="source-highlight custom-scrollbar"
+                aria-hidden="true"
+                dangerouslySetInnerHTML={{
+                  __html: highlightSource(sourceCode, {
+                    showWhitespace,
+                    registerNotes,
+                  }),
+                }}
+              />
+              <textarea
+                ref={sourceEditorRef}
+                className="source-editor custom-scrollbar"
+                value={sourceCode}
+                onChange={(event) => commitSourceChange(event.target.value, {
+                  snapshot: getEditorSnapshot(event.currentTarget, sourceCode),
+                })}
+                onKeyDown={handleSourceKeyDown}
+                onClick={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
+                onKeyUp={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
+                onSelect={(event) => updateActiveRegisterNote(event.currentTarget, event.currentTarget.value)}
+                onScroll={syncSourceScroll}
+                spellCheck="false"
+                wrap="off"
+              />
+            </div>
+          )}
           {activeRegisterNote ? (
             <div className="note-card note-card-floating">
               <div className="note-card-title">{activeRegisterNote.register} note</div>
@@ -1565,12 +2066,24 @@ export default function App() {
               </div>
             </div>
           ) : null}
+          {activeInstructionDoc && !showDocumentation ? (
+            <div className="note-card note-card-floating note-card-secondary">
+              <div className="note-card-title">{activeInstructionDoc.opcode}</div>
+              <div className="note-card-body">{activeInstructionDoc.summary}</div>
+              <code className="instruction-tooltip-example">{activeInstructionDoc.example}</code>
+            </div>
+          ) : null}
         </section>
 
         <section className="panel panel-data">
           <div className="panel-header">
             <span>Data</span>
-            <span className="panel-tag">{dataDirective} ({dataStride} byte cells)</span>
+            <div className="panel-header-controls">
+              <span className="panel-tag">{dataDirective} ({dataStride} byte cells)</span>
+              <button type="button" className="btn btn-small btn-ghost" onClick={handleClearData}>
+                <Trash2 size={14} /> Clear Data
+              </button>
+            </div>
           </div>
           <div className="editor-statusbar">
             <span>Supports `.byte`, `.half`, `.word`, `.long`, `.quad`</span>
@@ -1591,23 +2104,49 @@ export default function App() {
           </div>
         </section>
 
+        <section className="panel panel-console">
+          <div className="console-header">Mini Console</div>
+          <div className="console-output custom-scrollbar">
+            {machineState.consoleOutput.length ? (
+              machineState.consoleOutput.map((line, index) => (
+                <div key={`${line}-${index}`} className="console-line">{line}</div>
+              ))
+            ) : (
+              <div className="console-empty">No output yet</div>
+            )}
+          </div>
+        </section>
+
         <section className="panel panel-trace">
           <div className="panel-header">
             <span>Execution View</span>
             <div className="panel-header-controls">
+              <button type="button" className="btn btn-small btn-success" onClick={handleRun} disabled={!assembled || machineState.halted} title="Alt + R">
+                <Play size={14} /> Run
+              </button>
+              <button type="button" className="btn btn-small btn-secondary" onClick={handleStep} disabled={!assembled || machineState.halted} title="Alt + S">
+                <StepForward size={14} /> Step
+              </button>
               <span className="pc-badge">PC: {machineState.pc}</span>
               <span className="lr-badge">LR: {lrInst ? lrInst.pc : 'None'}</span>
             </div>
           </div>
           {assembled && currentInst && !machineState.halted ? (
-            <div className="current-inst-bar">
-              <span className="current-inst-arrow">▶</span>
-              <span className="current-inst-text">{currentInst.original}</span>
-              <span className="current-inst-pc">:{currentInst.pc.toString().padStart(4, '0')}</span>
+            <div className="next-inst-shell">
+              <div className="current-inst-bar">
+                <span className="current-inst-arrow">Current</span>
+                <span className="current-inst-text">{currentInst.original}</span>
+                <span className="current-inst-pc">:{currentInst.pc.toString().padStart(4, '0')}</span>
+              </div>
+              <div className="current-inst-bar next-inst-bar">
+                <span className="current-inst-arrow">Next</span>
+                <span className="current-inst-text">{nextInst ? nextInst.original : 'None'}</span>
+                <span className="current-inst-pc">{nextInst ? `:${nextInst.pc.toString().padStart(4, '0')}` : ''}</span>
+              </div>
             </div>
           ) : assembled && machineState.halted ? (
             <div className="current-inst-bar current-inst-bar-halted">
-              <span className="current-inst-arrow">■</span>
+              <span className="current-inst-arrow">Halt</span>
               <span className="current-inst-text">Program halted</span>
             </div>
           ) : null}
@@ -1644,18 +2183,6 @@ export default function App() {
               })
             )}
           </div>
-          <div className="console-shell">
-            <div className="console-header">Mini Console</div>
-            <div className="console-output custom-scrollbar">
-              {machineState.consoleOutput.length ? (
-                machineState.consoleOutput.map((line, index) => (
-                  <div key={`${line}-${index}`} className="console-line">{line}</div>
-                ))
-              ) : (
-                <div className="console-empty">No output yet</div>
-              )}
-            </div>
-          </div>
         </section>
 
         <section className="panel panel-flags">
@@ -1673,28 +2200,32 @@ export default function App() {
         <section className="panel panel-registers">
           <div className="panel-header">
             <span>Registers</span>
-            <select
-              className="value-format-select"
-              value={registerFormat}
-              onChange={(event) => setRegisterFormat(event.target.value)}
-            >
-              {VALUE_FORMATS.map((format) => (
-                <option key={format} value={format}>{format}</option>
-              ))}
-            </select>
+            <div className="panel-header-controls">
+              <button type="button" className="btn btn-small btn-ghost" onClick={handleClearRegisters}>
+                <Trash2 size={14} /> Clear Registers
+              </button>
+              <select
+                className="value-format-select"
+                value={registerFormat}
+                onChange={(event) => setRegisterFormat(event.target.value)}
+              >
+                {VALUE_FORMATS.map((format) => (
+                  <option key={format} value={format}>{format}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="register-grid custom-scrollbar">
             {machineState.regs.map((value, index) => {
               if (index === 31) return null;
-              const isMutated = machineState.lastMutatedRegisters.includes(index);
               const isDestination = currentRegisterUsage.destination.has(index);
               const isSource = currentRegisterUsage.source.has(index);
               const cardClasses = [
                 'register-card',
-                isMutated ? 'register-card-mutated' : '',
                 isDestination ? 'register-card-destination' : '',
                 !isDestination && isSource ? 'register-card-source' : '',
               ].filter(Boolean).join(' ');
+              const showOverflowWarning = isRegisterOutOfRange(value);
 
               const registerNoteEntries =
                 registerNotes[`X${index}`]
@@ -1712,7 +2243,14 @@ export default function App() {
                       X{index}
                       <span className="register-alias">{getRegAlias(index)}</span>
                     </span>
-                    <span className="register-value">{formatValue(value, registerFormat)}</span>
+                    <span className="register-value-wrap">
+                      <span className="register-value">{formatValue(value, registerFormat)}</span>
+                      {showOverflowWarning ? (
+                        <span className="register-warning" title="This value cannot be represented in a signed 64-bit register.">
+                          <AlertTriangle size={12} />
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
                   {registerNoteEntries.length ? (
                     <div className="register-note-list">
@@ -1739,6 +2277,18 @@ export default function App() {
           <div className="panel-header panel-header-icon">
             <span className="panel-header-controls">
               <span className="panel-header-icon-text"><Layers size={16} /> Stack Memory</span>
+              <button type="button" className="btn btn-small btn-ghost" onClick={handleClearStackMemory}>
+                <Trash2 size={14} /> Clear Stack
+              </button>
+              <select
+                className="value-format-select"
+                value={stackStride}
+                onChange={(event) => setStackStride(Number.parseInt(event.target.value, 10))}
+              >
+                {STACK_STRIDE_OPTIONS.map((stride) => (
+                  <option key={stride} value={stride}>{stride} byte{stride === 1 ? '' : 's'}</option>
+                ))}
+              </select>
               <select
                 className="value-format-select"
                 value={stackFormat}
@@ -1821,6 +2371,7 @@ export default function App() {
                   const hasValue = value !== undefined;
                   const isInFrame = addr <= frameTop && addr >= frameBottom;
                   const isOffsetTarget = stackOffsetPointer?.address !== undefined && addr === stackOffsetPointer.address;
+                  const note = machineState.memoryNotes[addr];
 
                   return (
                     <div
@@ -1831,6 +2382,7 @@ export default function App() {
                       <span className={`stack-value${hasValue ? ' stack-value-filled' : ''}`}>
                         {formatValue(hasValue ? value : 0, stackFormat)}
                       </span>
+                      <span className="stack-note" title={note || undefined}>{note || ''}</span>
                     </div>
                   );
                 })}

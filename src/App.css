@@ -148,7 +148,7 @@
   max-width: 1360px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(360px, 1.35fr) minmax(108px, 0.28fr) minmax(200px, 0.58fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(340px, 1.1fr) minmax(76px, 0.18fr) minmax(300px, 0.95fr) minmax(320px, 1fr);
   gap: 24px;
   align-items: stretch;
 }
@@ -169,6 +169,10 @@
   min-height: 750px;
 }
 
+.panel-console {
+  grid-column: 1 / -1;
+}
+
 .panel {
   border: 1px solid #1e293b;
   border-radius: 20px;
@@ -187,6 +191,7 @@
 .panel-flags {
   grid-column: 2 / 3;
   min-height: 220px;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-self: start;
@@ -196,6 +201,7 @@
   grid-column: 3 / 4;
   min-height: 100px; /*Register Panel Height*/
   max-height: 650px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -345,6 +351,12 @@
   pointer-events: none;
 }
 
+.note-card-secondary {
+  top: 252px;
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(30, 64, 175, 0.18);
+}
+
 .note-card-title {
   margin-bottom: 6px;
   color: #a7f3d0;
@@ -366,9 +378,71 @@
 .source-editor-shell {
   flex: 1;
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 74px minmax(0, 1fr);
   overflow: hidden;
   background: transparent;
+}
+
+.documentation-panel {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.documentation-card {
+  padding: 14px;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.documentation-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.documentation-opcode,
+.documentation-status,
+.documentation-example,
+.instruction-tooltip-example {
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.documentation-opcode {
+  color: #dbeafe;
+  font-weight: 700;
+}
+
+.documentation-status {
+  color: #86efac;
+  font-size: 0.72rem;
+}
+
+.documentation-status-unsupported {
+  color: #fbbf24;
+}
+
+.documentation-summary {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.documentation-example,
+.instruction-tooltip-example {
+  display: block;
+  color: #fcd34d;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
 }
 
 .data-editor-shell {
@@ -377,7 +451,7 @@
   background: transparent;
 }
 
-.source-line-numbers,
+.source-gutter,
 .source-highlight,
 .source-editor {
   padding: 18px;
@@ -387,14 +461,36 @@
   white-space: pre;
 }
 
-.source-line-numbers {
-  margin: 0;
+.source-gutter {
   overflow: hidden;
-  text-align: right;
   color: #475569;
   background: rgba(15, 23, 42, 0.72);
   border-right: 1px solid #1e293b;
   user-select: none;
+}
+
+.source-gutter-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 6px;
+  min-height: 1.5em;
+}
+
+.source-warning-cell {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.source-warning-icon {
+  color: #f59e0b;
+  display: inline-flex;
+  align-items: center;
+}
+
+.source-line-number {
+  display: block;
+  text-align: right;
 }
 
 .source-highlight,
@@ -462,21 +558,10 @@
   color: rgba(148, 163, 184, 0.28);
 }
 
-.token-register-mutated {
-  background: rgba(250, 204, 21, 0.12);
-  box-shadow: inset 0 -1px 0 rgba(250, 204, 21, 0.45);
-  border-radius: 4px;
-}
-
 .trace-list {
   flex: 1;
   overflow: auto;
   padding: 8px;
-}
-
-.console-shell {
-  border-top: 1px solid #1e293b;
-  background: rgba(2, 6, 23, 0.82);
 }
 
 .console-header {
@@ -646,9 +731,11 @@
   width: 100%;
 }
 
-.register-card-mutated {
-  border-color: rgba(250, 204, 21, 0.65);
-  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.18);
+.register-value-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 70%;
 }
 
 .register-card-destination {
@@ -683,13 +770,21 @@
 .register-value {
   color: #34d399;
   font-size: 0.66rem;
+  white-space: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
+  padding-bottom: 2px;
 }
 
 .register-note {
   color: #93c5fd;
   font-size: 0.62rem;
   line-height: 1.35;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
+  display: block;
+  padding-bottom: 2px;
 }
 
 .register-note-list {
@@ -697,6 +792,13 @@
   flex-direction: column;
   gap: 2px;
   width: 100%;
+}
+
+.register-warning {
+  color: #f59e0b;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .flag-grid {
@@ -813,7 +915,6 @@
 .stack-row {
   height: 32px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -854,6 +955,17 @@
   font-weight: 700;
 }
 
+.stack-note {
+  margin-left: auto;
+  color: #93c5fd;
+  font: 0.68rem/1.3 'Consolas', 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42%;
+  text-align: right;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 7px;
   height: 7px;
@@ -872,6 +984,16 @@
   background: #475569;
 }
 
+.next-inst-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.next-inst-bar {
+  background: rgba(15, 23, 42, 0.9);
+  border-bottom: 1px solid rgba(51, 65, 85, 0.75);
+}
+
 @media (max-width: 1180px) {
   .panel-grid {
     grid-template-columns: 1fr;
@@ -879,6 +1001,7 @@
 
   .panel-source,
   .panel-data,
+  .panel-console,
   .panel-trace,
   .panel-flags,
   .panel-registers,
@@ -908,6 +1031,14 @@
 
   .register-grid {
     grid-template-columns: 1fr;
+  }
+
+  .note-card-floating,
+  .note-card-secondary {
+    position: static;
+    width: auto;
+    margin: 12px 16px 0;
+    pointer-events: auto;
   }
 }
 /* ── Add these rules to your App.css ── */
