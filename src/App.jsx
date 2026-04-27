@@ -309,6 +309,13 @@ function getInstructionDocsForDisplay(code) {
   return docs;
 }
 
+function extractLineNumberFromErrorMessage(message) {
+  const match = message?.match(/\bLine\s+(\d+):/i);
+  if (!match) return null;
+  const lineNumber = Number.parseInt(match[1], 10);
+  return Number.isNaN(lineNumber) ? null : lineNumber;
+}
+
 function getParsedSourceLines(code) {
   const lines = code.split('\n');
   const parsedLines = [];
@@ -586,6 +593,7 @@ function highlightSource(code, options = {}) {
   const {
     showWhitespace = false,
     registerNotes = {},
+    errorLineNumber = null,
   } = options;
   let html = '';
   let buffer = '';
@@ -666,7 +674,14 @@ function highlightSource(code, options = {}) {
     html += '</span>';
   }
 
-  return html;
+  return html
+    .split('\n')
+    .map((line, index) => {
+      const classes = ['source-code-line'];
+      if (errorLineNumber === index + 1) classes.push('source-code-line-error');
+      return `<span class="${classes.join(' ')}">${line || '&nbsp;'}</span>`;
+    })
+    .join('');
 }
 
 function formatAssembly(code) {
@@ -697,6 +712,71 @@ function formatAssembly(code) {
       return commentPart ? `${formattedCode} ${commentPart.trimStart()}` : formattedCode;
     })
     .join('\n');
+}
+
+function formatSingleLineComments(code) {
+  const lines = code.split('\n');
+  const lineMeta = [];
+  let inBlockComment = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const originalLine = lines[index];
+    const withoutTrailingWhitespace = originalLine.replace(/\s+$/g, '');
+    const { codePart, commentPart, inBlockComment: nextInBlockComment } =
+      splitLineIntoCodeAndComment(withoutTrailingWhitespace, inBlockComment);
+    inBlockComment = nextInBlockComment;
+
+    const trimmedCode = codePart.trim();
+    const trimmedComment = commentPart.trimStart();
+    const hasInlineSlashComment =
+      Boolean(trimmedCode)
+      && trimmedComment.startsWith('//')
+      && !trimmedComment.startsWith('///');
+
+    lineMeta.push({
+      originalLine,
+      codePart,
+      trimmedCode,
+      commentPart,
+      trimmedComment,
+      hasInlineSlashComment,
+    });
+  }
+
+  const formattedLines = [...lines];
+  let groupStart = null;
+
+  const flushGroup = (endExclusive) => {
+    if (groupStart === null) return;
+    const group = lineMeta.slice(groupStart, endExclusive);
+    const maxCodeLength = group.reduce((max, line) => {
+      const codeLength = line.codePart.replace(/\s+$/g, '').length;
+      return Math.max(max, codeLength);
+    }, 0);
+
+    group.forEach((line, offset) => {
+      const codeWithoutTrailingWhitespace = line.codePart.replace(/\s+$/g, '');
+      const paddingWidth = Math.max(1, maxCodeLength - codeWithoutTrailingWhitespace.length + 1);
+      formattedLines[groupStart + offset] = `${codeWithoutTrailingWhitespace}${' '.repeat(paddingWidth)}${line.trimmedComment}`;
+    });
+
+    groupStart = null;
+  };
+
+  for (let index = 0; index <= lineMeta.length; index += 1) {
+    const line = lineMeta[index];
+    const isEligible = Boolean(line?.hasInlineSlashComment);
+
+    if (isEligible && groupStart === null) {
+      groupStart = index;
+      continue;
+    }
+
+    if (isEligible) continue;
+    flushGroup(index);
+  }
+
+  return formattedLines.join('\n');
 }
 
 function getInitialState() {
@@ -1173,6 +1253,7 @@ export default function App() {
   const [showWhitespace, setShowWhitespace] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
+  const [errorLineNumber, setErrorLineNumber] = useState(null);
   const [activeRegisterNote, setActiveRegisterNote] = useState(null);
   const [activeInstructionDoc, setActiveInstructionDoc] = useState(null);
   const [loadedDataMemory, setLoadedDataMemory] = useState({});
@@ -1264,6 +1345,7 @@ export default function App() {
     sourceRedoRef.current = [];
     setSourceCode(nextValue);
     setAssembled(false);
+    setErrorLineNumber(null);
     setActiveRegisterNote(null);
     setActiveInstructionDoc(null);
     if (typeof selectionStart === 'number') {
@@ -1322,6 +1404,10 @@ export default function App() {
 
   const handleFormatSource = () => {
     commitSourceChange(formatAssembly(sourceCode));
+  };
+
+  const handleFormatComments = () => {
+    commitSourceChange(formatSingleLineComments(sourceCode));
   };
 
   const handleSourceKeyDown = (event) => {
@@ -1409,8 +1495,10 @@ export default function App() {
       setDataDirective(directive);
       setDataStride(stride);
       setError('');
+      setErrorLineNumber(null);
     } catch (err) {
       setError(`Assembly Error: ${err.message}`);
+      setErrorLineNumber(extractLineNumberFromErrorMessage(err.message));
       setAssembled(false);
     }
   }
@@ -1758,8 +1846,10 @@ export default function App() {
       setExecutionHistoryDepth(executionHistoryRef.current.length);
       setMachineState(executeStep(program, labels, machineState));
       setError('');
+      setErrorLineNumber(null);
     } catch (err) {
       setError(`Runtime Error: ${err.message}`);
+      setErrorLineNumber(extractLineNumberFromErrorMessage(err.message));
       setMachineState((state) => ({ ...state, halted: true }));
     }
   }
@@ -1776,6 +1866,7 @@ export default function App() {
       while (!state.halted && count < maxSteps) {
         if (!skipFirst && breakpoints.includes(state.pc)) {
           setError(`Execution paused at breakpoint on PC ${state.pc}.`);
+          setErrorLineNumber(null);
           setMachineState(state);
           return;
         }
@@ -1786,8 +1877,10 @@ export default function App() {
 
       setMachineState(state);
       setError(count >= maxSteps ? `Execution paused: Reached safety limit of ${maxSteps} instructions.` : '');
+      setErrorLineNumber(null);
     } catch (err) {
       setError(`Runtime Error: ${err.message}`);
+      setErrorLineNumber(extractLineNumberFromErrorMessage(err.message));
     }
   }
 
@@ -1798,6 +1891,7 @@ export default function App() {
     setDataInput('');
     setLoadedDataMemory({});
     setError('');
+    setErrorLineNumber(null);
   };
 
   const handleClearData = () => {
@@ -1805,11 +1899,13 @@ export default function App() {
     setLoadedDataMemory({});
     setMachineState((state) => ({ ...state, memory: {}, memoryNotes: {} }));
     setError('');
+    setErrorLineNumber(null);
   };
 
   const handleClearStackMemory = () => {
     setMachineState((state) => ({ ...state, memory: { ...loadedDataMemory }, memoryNotes: {} }));
     setError('');
+    setErrorLineNumber(null);
   };
 
   const handleClearRegisters = () => {
@@ -1819,6 +1915,7 @@ export default function App() {
       regs: initialState.regs,
     }));
     setError('');
+    setErrorLineNumber(null);
   };
 
   const toggleBreakpoint = (pc) => {
@@ -1961,6 +2058,9 @@ export default function App() {
               <button type="button" className="btn btn-small btn-ghost" onClick={handleFormatSource}>
                 Format
               </button>
+              <button type="button" className="btn btn-small btn-ghost" onClick={handleFormatComments}>
+                Format Comments
+              </button>
               <button
                 type="button"
                 className={`btn btn-small btn-ghost${showDocumentation ? ' btn-toggle-active' : ''}`}
@@ -2012,8 +2112,9 @@ export default function App() {
               <div ref={sourceLineNumbersRef} className="source-gutter" aria-hidden="true">
                 {sourceCode.split('\n').map((_, index) => {
                   const warning = sourceInstructionWarnings[index];
+                  const isErrorLine = errorLineNumber === index + 1;
                   return (
-                    <div key={`line-${index + 1}`} className="source-gutter-row">
+                    <div key={`line-${index + 1}`} className={`source-gutter-row${isErrorLine ? ' source-gutter-row-error' : ''}`}>
                       <span className="source-warning-cell">
                         {warning ? (
                           <span className="source-warning-icon" title={`${warning} may be unsupported in the simulator`}>
@@ -2034,6 +2135,7 @@ export default function App() {
                   __html: highlightSource(sourceCode, {
                     showWhitespace,
                     registerNotes,
+                    errorLineNumber,
                   }),
                 }}
               />
