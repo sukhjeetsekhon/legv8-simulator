@@ -55,10 +55,11 @@ Type directly in the **Source Code** panel. Labels, opcodes, registers, immediat
 Use the **Data** panel to define numeric values preloaded into memory before execution.
 
 ```asm
-.long
-arr1: -20, 0, 1, 10, 100
+arr1: -20 0 1 10 100
 arr2: 120, 2, 3, 4, 5
 ```
+
+If you omit the directive line, the simulator uses `.long` by default. Values can be separated by commas, whitespace, or a mix of both.
 
 Supported directives:
 

@@ -83,7 +83,7 @@ const IMPLEMENTED_INSTRUCTIONS = new Set([
   'LDURB', 'STURB', 'LDXR', 'STXR', 'MOVZ', 'MOVK', 'CBZ', 'CBNZ',
   'B.EQ', 'B.NE', 'B.HS', 'B.LO', 'B.HI', 'B.LS', 'B.GE', 'B.LT',
   'B.GT', 'B.LE', 'B.MI', 'B.PL', 'B.VS', 'B.VC', 'B', 'BR', 'BL',
-  'CMP', 'CMPI', 'MOV', 'MUL', 'LDA', 'PUTINT', 'STOP',
+  'CMP', 'CMPI', 'MOV', 'MUL', 'LDA', 'PUTINT', 'PUTCHAR', 'STOP',
 ]);
 const INSTRUCTION_DOCS = [
   ['ADD', 'Adds two registers and writes the result.', 'ADD X0, X1, X2'],
@@ -141,6 +141,7 @@ const INSTRUCTION_DOCS = [
   ['MUL', 'Multiplies two registers.', 'MUL X1, X1, X0'],
   ['LDA', 'Loads an immediate or label address into a register.', 'LDA X0, arr1'],
   ['PUTINT', 'Appends a register value to the mini console output.', 'PUTINT X0'],
+  ['PUTCHAR', 'Appends the low byte of a register as a character to the mini console output.', 'PUTCHAR X0'],
   ['STOP', 'Halts the simulator immediately.', 'STOP'],
 ];
 const INSTRUCTION_DOC_MAP = Object.fromEntries(
@@ -829,18 +830,18 @@ function parseDataSection(dataInput) {
     return { memory: {}, labels: {}, directive: '.long', stride: 8 };
   }
 
-  const directive = lines[0].toLowerCase();
+  const firstLine = lines[0].toLowerCase();
+  const hasExplicitDirective = Boolean(DATA_DIRECTIVES[firstLine]);
+  const directive = hasExplicitDirective ? firstLine : '.long';
   const stride = DATA_DIRECTIVES[directive];
-  if (!stride) {
-    throw new Error(`Data must start with one of ${Object.keys(DATA_DIRECTIVES).join(', ')}`);
-  }
 
   const memory = {};
   const labels = {};
   let nextAddress = DATA_BASE;
+  const entryLines = hasExplicitDirective ? lines.slice(1) : lines;
 
-  for (let i = 1; i < lines.length; i += 1) {
-    const entry = lines[i];
+  for (let i = 0; i < entryLines.length; i += 1) {
+    const entry = entryLines[i];
     const match = entry.match(/^([A-Za-z_]\w*):\s*(.+)$/);
     if (!match) {
       throw new Error(`Invalid data declaration: ${entry}`);
@@ -851,7 +852,7 @@ function parseDataSection(dataInput) {
       throw new Error(`Duplicate data label: ${label}`);
     }
 
-    const rawValues = valuesStr.split(',').map((value) => value.trim()).filter(Boolean);
+    const rawValues = valuesStr.split(/[,\s]+/).map((value) => value.trim()).filter(Boolean);
     if (!rawValues.length) {
       throw new Error(`Data label ${label} must define at least one value`);
     }
@@ -1309,6 +1310,16 @@ export default function App() {
     const onKeyDown = (event) => handleGlobalShortcut(event);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   const syncSourceScroll = () => {
@@ -1774,6 +1785,9 @@ export default function App() {
         case 'PUTINT':
           newConsoleOutput.push(`${readReg(args[0])}`);
           break;
+        case 'PUTCHAR':
+          newConsoleOutput.push(String.fromCharCode(readReg(args[0]) & 0xff));
+          break;
         case 'STOP':
           return {
             pc,
@@ -2188,7 +2202,7 @@ export default function App() {
             </div>
           </div>
           <div className="editor-statusbar">
-            <span>Supports `.byte`, `.half`, `.word`, `.long`, `.quad`</span>
+            <span>Supports `.byte`, `.half`, `.word`, `.long`, `.quad`; commas or whitespace delimit values; default is `.long`</span>
           </div>
           <div className="data-editor-shell">
             <textarea
@@ -2201,7 +2215,7 @@ export default function App() {
               onKeyDown={handleDataKeyDown}
               spellCheck="false"
               wrap="off"
-              placeholder={['.long', 'arr1: 1, 2, 3', 'arr2: 4, 5, 6'].join('\n')}
+              placeholder={['arr1: 1 2 3', 'arr2: 4, 5, 6'].join('\n')}
             />
           </div>
         </section>
